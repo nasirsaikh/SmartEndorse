@@ -49,7 +49,7 @@
 
   {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=False show_tpa_controls=True %}
 
-  <section class="se-panel overflow-hidden">
+  <section class="se-panel overflow-hidden" id="processing-helpdesk">
     <div class="se-panel-head">
       <div>
         <div class="se-eyebrow">Processing help desk</div>
@@ -140,19 +140,31 @@
           </div>
         </div>
 
-        {% if current_step == "processing" and can_tpa_process or current_step == "processing" and can_insurer_operate %}
+        {% if endorsement.status != "COMPLETED" and endorsement.status != "CANCELLED" %}
         <div class="p-4">
-          <div class="se-eyebrow mb-3">Action composer</div>
+          <div class="se-eyebrow mb-3">Help desk composer</div>
           <div role="tablist" class="tabs tabs-lift">
-            <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Query" checked>
+            <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Message" checked>
+            <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
+              <form method="post" action="{% url 'endorsement_processing_message' endorsement.pk %}" class="space-y-3">
+                {% csrf_token %}
+                <div class="text-[10px] leading-4 opacity-55">Send a normal help desk message without changing the endorsement status.</div>
+                <textarea class="textarea textarea-bordered w-full" name="message" rows="5" placeholder="Type a message to the requester, insurer or TPA…" required></textarea>
+                <button class="btn btn-primary btn-sm w-full" type="submit"><i class="bi bi-send"></i>SEND MESSAGE</button>
+              </form>
+            </div>
+
+            {% if current_step == "processing" and can_tpa_process or current_step == "processing" and can_insurer_operate %}
+            <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Query">
             <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
               <form method="post" action="{% url 'endorsement_query' endorsement.pk %}" class="space-y-3">
                 {% csrf_token %}
                 <div class="se-field"><label>Subject</label>{{ query_form.subject }}</div>
                 <div class="se-field"><label>Message</label>{{ query_form.message }}</div>
-                <button class="btn btn-warning btn-outline btn-sm w-full" type="submit"><i class="bi bi-chat-left-text"></i>SEND QUERY</button>
+                <button class="btn btn-warning btn-outline btn-sm w-full" type="submit"><i class="bi bi-chat-left-text"></i>RAISE QUERY</button>
               </form>
             </div>
+            {% endif %}
 
             {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
             <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Reject">
@@ -181,7 +193,7 @@
         </div>
         {% else %}
         <div class="p-4 text-[10px] leading-4 opacity-50">
-          Processing actions are shown only to the organization currently responsible for this step. Conversation history remains visible to permitted users.
+          This processing conversation is closed because the endorsement is {{ endorsement.get_status_display|lower }}.
         </div>
         {% endif %}
       </aside>
