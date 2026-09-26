@@ -602,7 +602,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
 
     @patch.object(
         AIService,
-        "_vision_ocr_text",
+        "_vision_form_text",
         return_value=(
             "Civil Number: 99887766\n"
             "Insured Name: Noura Said\n"
@@ -636,6 +636,48 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(row["gender"], "Female")
         self.assertEqual(row["plan_code"], "G")
         self.assertTrue(ocr_mock.called)
+
+    @patch("core.ai.httpx.Client")
+    def test_glm_form_fill_uses_short_chat_request_not_json(self, client_cls):
+        provider = AIProviderConfig.objects.create(
+            name="GLM Form OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            timeout_seconds=300,
+            is_active=True,
+            supports_vision=True,
+        )
+        response = MagicMock()
+        response.is_success = True
+        response.status_code = 200
+        response.json.return_value = {
+            "message": {
+                "content": (
+                    "Civil ID: 12345678\n"
+                    "Full Name: Sara Al Hinai\n"
+                    "Relationship: Daughter\n"
+                    "Date of Birth: 22/09/2018"
+                )
+            }
+        }
+        client = client_cls.return_value.__enter__.return_value
+        client.post.return_value = response
+
+        ai = AIService(config=provider)
+        row = ai.extract_form_fields_from_image_bytes(b"fake-image", "image/jpeg")
+
+        self.assertEqual(row["national_id"], "12345678")
+        self.assertEqual(row["full_name"], "Sara Al Hinai")
+        url = client.post.call_args.args[0]
+        payload = client.post.call_args.kwargs["json"]
+        self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
+        self.assertNotIn("format", payload)
+        self.assertEqual(payload["options"]["num_ctx"], 4096)
+        self.assertEqual(payload["options"]["num_predict"], 512)
+        self.assertEqual(payload["options"]["temperature"], 0.0)
+        self.assertIn("do not return JSON", payload["messages"][0]["content"])
+        self.assertTrue(payload["messages"][0]["images"])
 
     @patch("core.ai.httpx.Client")
     def test_bakllava_vision_uses_generate_endpoint_and_json_mode(self, client_cls):
