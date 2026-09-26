@@ -71,9 +71,13 @@
 
           <div class="dropdown dropdown-end">
             <button tabindex="0" class="btn btn-ghost h-auto min-h-0 gap-2 px-2 py-1.5" type="button">
-              <div class="avatar placeholder">
+              <div class="avatar">
                 <div class="w-8 rounded bg-primary text-primary-content">
-                  <span class="text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>
+                  {% if current_profile.photo %}
+                  <img src="{{ current_profile.photo.url }}" alt="{{ user.get_full_name|default:user.username }}">
+                  {% else %}
+                  <span class="grid h-full w-full place-items-center text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>
+                  {% endif %}
                 </div>
               </div>
               <div class="hidden text-left lg:block">
@@ -88,6 +92,7 @@
                 <div class="text-xs opacity-60">{{ current_profile.get_role_display }}</div>
               </div>
               <div class="divider my-1"></div>
+              <a class="btn btn-ghost btn-sm w-full justify-start" href="{% url 'profile' %}"><i class="bi bi-person-gear"></i>My profile</a>
               {% if user.is_staff %}
               <a class="btn btn-ghost btn-sm w-full justify-start" href="/admin/"><i class="bi bi-sliders"></i>Django administration</a>
               {% endif %}
