@@ -468,15 +468,17 @@ def _wizard(endorsement):
 @login_required
 def request_detail(request, pk):
     endorsement = _get_accessible_request(request.user, pk)
-    items = list(endorsement.items.all())
+    items = list(endorsement.items.select_related("plan").all())
     item_kpis = {
         "total": len(items),
         "correct": sum(i.validation_status == EndorsementItem.ValidationStatus.VALID for i in items),
         "errors": sum(i.validation_status == EndorsementItem.ValidationStatus.ERROR for i in items),
         "existing": sum(i.is_existing_record for i in items),
         "approval": sum(i.validation_status == EndorsementItem.ValidationStatus.APPROVAL_REQUIRED for i in items),
+        "tpa_approved": sum(i.tpa_status == EndorsementItem.TPAStatus.APPROVED for i in items),
+        "tpa_pending": sum(i.tpa_status != EndorsementItem.TPAStatus.APPROVED for i in items),
     }
-    approvals = list(endorsement.approvals.all())
+    approvals = list(endorsement.approvals.select_related("assigned_organization", "item", "decided_by").all())
     for approval in approvals:
         approval.can_decide_for_user = can_decide_approval(request.user, approval)
 
@@ -485,11 +487,7 @@ def request_detail(request, pk):
     for item in items:
         member_label = item.full_name or item.member_no or item.employee_no or item.national_id or f"Item {item.pk}"
         for error in item.validation_errors or []:
-            member_issues.append({
-                "item": item,
-                "member_label": member_label,
-                "error": error,
-            })
+            member_issues.append({"item": item, "member_label": member_label, "error": error})
             known_validation_errors.add(f'Item {item.pk}: {error}')
             known_validation_errors.add(f'Member "{member_label}" (Item {item.pk}): {error}')
 
@@ -506,20 +504,16 @@ def request_detail(request, pk):
             "blocking": not optional_ocr,
         })
         known_validation_errors.add(f"{attachment.original_name}: {attachment.processing_error}")
-        known_validation_errors.add(
-            f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}'
-        )
+        known_validation_errors.add(f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}')
 
-    request_issues = [
-        error for error in (endorsement.validation_errors or [])
-        if error not in known_validation_errors
-    ]
+    request_issues = [error for error in (endorsement.validation_errors or []) if error not in known_validation_errors]
 
     resolution_rows = []
     for event in endorsement.events.filter(
         event_type__in=[
             "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED",
             "BULK_ITEM_RECOVERED", "VALIDATION_ROW_CREATED", "VALIDATION_ITEM_DELETED",
+            "INTAKE_ITEM_ADDED", "TPA_ITEM_UPDATED",
         ]
     ):
         payload = event.payload if isinstance(event.payload, dict) else {}
@@ -530,23 +524,88 @@ def request_detail(request, pk):
             "after_or_filled": payload.get("after") or payload.get("filled") or "—",
         })
 
+    wizard_steps, total_sla_target, total_sla_actual = _wizard(endorsement)
+    valid_steps = {step["key"] for step in wizard_steps}
+    active_step = request.GET.get("step") or _status_stage_key(endorsement)
+    if active_step not in valid_steps:
+        active_step = _status_stage_key(endorsement)
+
+    can_edit = can_edit_request(request.user, endorsement)
+    item_form = EndorsementItemCorrectionForm(policy=endorsement.policy, initial={"effective_date": endorsement.effective_date})
+
+    rejection_reason = ""
+    rejected_approval = endorsement.approvals.filter(status=EndorsementApproval.Status.REJECTED).order_by("-decided_at").first()
+    if rejected_approval:
+        rejection_reason = rejected_approval.decision_comment or rejected_approval.reason
+
     return render(request, "endorsements/detail.html", {
-        "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
-        "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
+        "endorsement": endorsement,
+        "query_form": QueryForm(),
+        "response_form": QueryResponseForm(),
+        "supplemental_form": SupplementalUploadForm(),
+        "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
-        "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
+        "item_form": item_form,
+        "item_kpis": item_kpis,
+        "wizard_steps": wizard_steps,
+        "active_step": active_step,
+        "total_sla_target": total_sla_target,
+        "total_sla_actual": total_sla_actual,
+        "approvals": approvals,
         "resolution_rows": resolution_rows,
         "member_issues": member_issues,
         "document_issues": document_issues,
         "request_issues": request_issues,
+        "rejection_reason": rejection_reason,
+        "risk_reasons": (endorsement.metadata or {}).get("insurer_review_reasons", []),
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
-        "can_edit": can_edit_request(request.user, endorsement),
-        "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
-            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+        "can_edit": can_edit,
+        "can_delete_items": can_edit and endorsement.status in {
+            EndorsementRequest.Status.DRAFT,
+            EndorsementRequest.Status.NEEDS_INFO,
+            EndorsementRequest.Status.TPA_QUERY,
+            EndorsementRequest.Status.REJECTED,
         },
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
+
+@login_required
+def add_item(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
+    }:
+        messages.error(request, "Manual members can only be added during Intake/correction.")
+        return redirect(f"/endorsements/{pk}/?step=intake")
+
+    form = EndorsementItemCorrectionForm(request.POST, policy=endorsement.policy)
+    if form.is_valid():
+        item = form.save(commit=False)
+        item.request = endorsement
+        if not item.effective_date:
+            item.effective_date = endorsement.effective_date
+        item.extracted_data = {"source": "manual_intake"}
+        item.validation_status = EndorsementItem.ValidationStatus.PENDING
+        item.save()
+        WorkflowEvent.objects.create(
+            request=endorsement,
+            actor=request.user,
+            event_type="INTAKE_ITEM_ADDED",
+            description=f"Member item {item.pk} added manually during Intake.",
+            payload={"item_id": item.pk, "source": "manual_intake"},
+        )
+        messages.success(request, "Member added to Intake. Review the row and continue to Validation when ready.")
+    else:
+        messages.error(request, _form_error_text(form))
+    return redirect(f"/endorsements/{pk}/?step=intake")
 
 
 @login_required
@@ -607,18 +666,31 @@ def revalidate_request(request, pk):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
-        messages.warning(request, "Revalidation is only available while the endorsement is still being corrected.")
-        return redirect("endorsement_detail", pk=pk)
+        messages.warning(request, "Validation can only be submitted while the endorsement is in Intake/correction.")
+        return redirect(f"/endorsements/{pk}/?step=validation")
 
     WorkflowService.revalidate_after_correction(endorsement, request.user)
     endorsement.refresh_from_db()
     if endorsement.validation_errors:
-        messages.warning(request, f"Revalidation completed with {len(endorsement.validation_errors)} blocking issue(s).")
-    else:
-        messages.success(request, "Revalidation passed. No blocking validation issues remain.")
-    return redirect("endorsement_detail", pk=pk)
-
+        messages.warning(request, f"Validation completed with {len(endorsement.validation_errors)} blocking issue(s). Return to Intake to correct them.")
+        return redirect(f"/endorsements/{pk}/?step=validation")
+    if endorsement.status == EndorsementRequest.Status.PENDING_INSURER_APPROVAL:
+        messages.warning(request, "Validation passed. The request is waiting for insurer review.")
+        return redirect(f"/endorsements/{pk}/?step=approval")
+    if endorsement.status in {
+        EndorsementRequest.Status.SENT_TO_TPA,
+        EndorsementRequest.Status.TPA_IN_PROGRESS,
+        EndorsementRequest.Status.READY_FOR_CORE,
+        EndorsementRequest.Status.CORE_DISPATCHED,
+    }:
+        messages.success(request, "Validation and approval routing completed. The request has moved to downstream processing.")
+        return redirect(f"/endorsements/{pk}/?step=tpa")
+    if endorsement.status == EndorsementRequest.Status.COMPLETED:
+        return redirect(f"/endorsements/{pk}/?step=completed")
+    messages.success(request, "Validation passed.")
+    return redirect(f"/endorsements/{pk}/?step=validation")
 
 @login_required
 def remove_failed_attachment(request, pk, attachment_id):
@@ -792,9 +864,14 @@ def delete_item(request, pk, item_id):
     endorsement = _get_accessible_request(request.user, pk)
     if not can_edit_request(request.user, endorsement):
         raise PermissionDenied
-    if endorsement.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO}:
-        messages.error(request, "Member rows can only be deleted while the endorsement is in validation.")
-        return redirect("endorsement_detail", pk=pk)
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
+    }:
+        messages.error(request, "Member rows can only be deleted while the endorsement is in Intake/correction.")
+        return redirect(f"/endorsements/{pk}/?step=intake")
 
     item = get_object_or_404(endorsement.items, pk=item_id)
     snapshot = {
@@ -810,31 +887,34 @@ def delete_item(request, pk, item_id):
         request=endorsement,
         actor=request.user,
         event_type="VALIDATION_ITEM_DELETED",
-        description=f"Item {deleted_id} deleted during validation.",
+        description=f"Item {deleted_id} deleted during Intake.",
         payload=snapshot,
     )
-    WorkflowService.revalidate_after_correction(endorsement, request.user)
-    messages.success(request, f"Member row {deleted_id} deleted and the endorsement was revalidated.")
-    return redirect("endorsement_detail", pk=pk)
-
+    messages.success(request, f"Member row {deleted_id} removed. Validate when the Intake list is ready.")
+    return redirect(f"/endorsements/{pk}/?step=intake")
 
 @login_required
 def supplemental_upload(request, pk):
     endorsement = _get_accessible_request(request.user, pk)
     if request.method != "POST":
-        messages.error(request, "Supplemental correction only accepts uploaded files.")
-        return redirect("endorsement_detail", pk=pk)
+        messages.error(request, "Intake correction only accepts uploaded files.")
+        return redirect(f"/endorsements/{pk}/?step=intake")
     if not can_edit_request(request.user, endorsement):
         messages.error(request, "You do not have permission to correct this endorsement.")
-        return redirect("endorsement_detail", pk=pk)
-    if endorsement.status not in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY}:
-        messages.warning(request, "Validation correction is only available while this endorsement is waiting for corrected information.")
-        return redirect("endorsement_detail", pk=pk)
+        return redirect(f"/endorsements/{pk}/?step=intake")
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
+    }:
+        messages.warning(request, "Files can only be added while the endorsement is in Intake/correction.")
+        return redirect(f"/endorsements/{pk}/?step=intake")
 
     form = SupplementalUploadForm(request.POST, request.FILES)
     if not form.is_valid():
-        messages.error(request, f"Supplemental upload could not be processed. {_form_error_text(form)}")
-        return redirect("endorsement_detail", pk=pk)
+        messages.error(request, f"Upload could not be processed. {_form_error_text(form)}")
+        return redirect(f"/endorsements/{pk}/?step=intake")
 
     processed = 0
     failures = []
@@ -854,10 +934,7 @@ def supplemental_upload(request, pk):
             attachment for attachment in created_attachments
             if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
         ]
-        structured_attachments = [
-            attachment for attachment in created_attachments
-            if attachment not in evidence_attachments
-        ]
+        structured_attachments = [attachment for attachment in created_attachments if attachment not in evidence_attachments]
 
         for attachment in structured_attachments:
             if FileIntakeService.process(attachment):
@@ -869,41 +946,32 @@ def supplemental_upload(request, pk):
             try:
                 bundle_result = FileIntakeService.process_supplemental_evidence_bundle(evidence_attachments)
                 processed += bundle_result["processed"]
-                warnings.extend(
-                    f"{item['file_name']}: {item['error']}"
-                    for item in bundle_result.get("warnings", [])
-                )
+                warnings.extend(f"{item['file_name']}: {item['error']}" for item in bundle_result.get("warnings", []))
             except Exception as exc:
                 failures.extend(
                     f"{attachment.original_name}: {attachment.processing_error or str(exc)}"
                     for attachment in evidence_attachments
                 )
 
-        if processed:
-            WorkflowService.revalidate_after_correction(endorsement, request.user)
+        WorkflowEvent.objects.create(
+            request=endorsement,
+            actor=request.user,
+            event_type="INTAKE_FILES_ADDED",
+            description=f"{len(created_attachments)} intake file(s) added for review.",
+            payload={"processed": processed, "failures": failures, "warnings": warnings},
+        )
 
         if failures:
             text = "; ".join(failures)
-            if processed:
-                messages.warning(request, f"{processed} validation file(s) were processed, but some failed: {text}")
-            else:
-                messages.error(request, f"Validation upload failed for {endorsement.reference}: {text}")
+            messages.warning(request, f"{processed} file(s) were processed, but some need attention: {text}")
         elif warnings:
-            messages.warning(
-                request,
-                f"{processed} validation file(s) were applied as one evidence bundle. "
-                f"Some files could not be read, but the remaining evidence was sufficient: {'; '.join(warnings)}",
-            )
+            messages.warning(request, f"{processed} file(s) were applied. Some evidence warnings remain: {'; '.join(warnings)}")
         else:
-            messages.success(
-                request,
-                f"{processed} validation file(s) processed. PDF/image files uploaded together were treated as one evidence bundle, so front/back pages can complement each other.",
-            )
+            messages.success(request, f"{processed} file(s) processed. Review the extracted member rows below before Validation.")
     except Exception as exc:
         logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)
-        messages.error(request, f"Supplemental upload failed for {endorsement.reference}: {exc}")
-    return redirect("endorsement_detail", pk=pk)
-
+        messages.error(request, f"Intake upload failed for {endorsement.reference}: {exc}")
+    return redirect(f"/endorsements/{pk}/?step=intake")
 
 @login_required
 def start_processing(request, pk):
@@ -930,12 +998,32 @@ def tpa_update_item(request, pk, item_id):
     item = get_object_or_404(endorsement.items, pk=item_id)
     form = TPAItemProcessingForm(request.POST, item=item)
     if form.is_valid():
-        approval = WorkflowService.update_tpa_item(item, request.user, form.cleaned_data["card_number"], form.cleaned_data["amount"])
-        messages.warning(request, "Amount changed; approval was raised and relevant parties were notified.") if approval else messages.success(request, "TPA member processing data updated.")
+        try:
+            approval = WorkflowService.update_tpa_item(
+                item,
+                request.user,
+                card_number=form.cleaned_data.get("card_number"),
+                effective_date=form.cleaned_data.get("effective_date"),
+                amount=form.cleaned_data.get("amount"),
+                action=form.cleaned_data["action"],
+                comment=form.cleaned_data.get("comment", ""),
+            )
+            action = form.cleaned_data["action"]
+            if approval:
+                messages.warning(request, "TPA amount changed from the system calculation. The configured approval party has been notified.")
+            elif action == "approve":
+                messages.success(request, "TPA member approved.")
+            elif action == "reject":
+                messages.warning(request, "TPA rejected the member and returned it for correction.")
+            elif action == "query":
+                messages.warning(request, "TPA query raised and the requester has been notified.")
+            else:
+                messages.success(request, "TPA processing data saved.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
     else:
-        messages.error(request, "Card number and amount are required.")
-    return redirect("endorsement_detail", pk=pk)
-
+        messages.error(request, _form_error_text(form))
+    return redirect(f"/endorsements/{pk}/?step=tpa")
 
 @login_required
 def decide_approval(request, pk, approval_id):
@@ -947,10 +1035,24 @@ def decide_approval(request, pk, approval_id):
         raise PermissionDenied
     form = ApprovalDecisionForm(request.POST)
     if form.is_valid():
-        WorkflowService.decide_approval(approval, request.user, form.cleaned_data["decision"] == "approve", form.cleaned_data["comment"])
-        messages.success(request, "Approval decision recorded with full audit history.")
-    return redirect("endorsement_detail", pk=pk)
-
+        try:
+            WorkflowService.decide_approval(
+                approval,
+                request.user,
+                form.cleaned_data["decision"] == "approve",
+                form.cleaned_data["comment"],
+            )
+            if form.cleaned_data["decision"] == "approve":
+                messages.success(request, "Approval recorded and the workflow was released to the next step.")
+            else:
+                messages.warning(request, "Rejection recorded with a mandatory reason. The requester can correct and resubmit.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, _form_error_text(form))
+    endorsement.refresh_from_db()
+    step = _status_stage_key(endorsement)
+    return redirect(f"/endorsements/{pk}/?step={step}")
 
 @login_required
 def complete_request(request, pk):
@@ -963,10 +1065,10 @@ def complete_request(request, pk):
     try:
         WorkflowService.complete(endorsement, request.user, request.POST.get("external_reference", "").strip())
         messages.success(request, "Endorsement completed and all relevant parties were notified.")
+        return redirect(f"/endorsements/{pk}/?step=completed")
     except ValueError as exc:
         messages.error(request, str(exc))
-    return redirect("endorsement_detail", pk=pk)
-
+    return redirect(f"/endorsements/{pk}/?step=tpa")
 
 @login_required
 def raise_query(request, pk):
@@ -1000,6 +1102,15 @@ def answer_query(request, pk, query_id):
 
 
 @login_required
+def profile(request):
+    form = ProfileForm(request.POST or None, request.FILES or None, instance=request.user.profile, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Profile updated.")
+        return redirect("profile")
+    return render(request, "profile.html", {"form": form})
+
+@login_required
 def set_preferences(request):
     if request.method != "POST":
         return HttpResponse(status=405)
@@ -1028,4 +1139,8 @@ def notifications_read(request):
     if request.method != "POST":
         return HttpResponse(status=405)
     request.user.portal_notifications.filter(is_read=False).update(is_read=True)
-    return HttpResponse(status=204)
+    notifications = request.user.portal_notifications.all()[:10]
+    response = render(request, "partials/_notifications.html", {"notifications": notifications, "unread_notifications": 0})
+    response["HX-Trigger"] = "notificationsRead"
+    return response
+
