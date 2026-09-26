@@ -79,7 +79,20 @@ def dashboard(request):
         EndorsementRequest.Status.FAILED,
         EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
         EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+        EndorsementRequest.Status.REJECTED,
     ]).count()
+    due_soon = qs.filter(
+        current_sla_due_at__isnull=False,
+        current_sla_due_at__gt=timezone.now(),
+        current_sla_due_at__lte=timezone.now() + timedelta(hours=24),
+    ).exclude(status=EndorsementRequest.Status.COMPLETED).count()
+    completed_rows = list(qs.filter(status=EndorsementRequest.Status.COMPLETED, completed_at__isnull=False).only("created_at", "completed_at"))
+    completed_hours = [max((item.completed_at - item.created_at).total_seconds() / 3600, 0) for item in completed_rows]
+    avg_total_sla_hours = round(sum(completed_hours) / len(completed_hours), 1) if completed_hours else 0
+    validation_scores = list(qs.values_list("validation_score", flat=True))
+    avg_validation_score = round(sum(float(v or 0) for v in validation_scores) / len(validation_scores), 1) if validation_scores else 0
+    pending_insurer = qs.filter(status=EndorsementRequest.Status.PENDING_INSURER_APPROVAL).count()
+    rejected = qs.filter(status=EndorsementRequest.Status.REJECTED).count()
     return render(request, "dashboard.html", {
         "total": total, "completed": completed, "open_count": total - completed, "breached": breached,
         "stp_rate": round((stp / total * 100), 1) if total else 0, "premium": premium,
@@ -89,6 +102,9 @@ def dashboard(request):
         "completion_rate": round((completed / total * 100), 1) if total else 0,
         "exception_rate": round((exceptions / total * 100), 1) if total else 0,
         "tpa_queue_rate": round((tpa_queue / total * 100), 1) if total else 0,
+        "due_soon": due_soon, "avg_total_sla_hours": avg_total_sla_hours,
+        "avg_validation_score": avg_validation_score, "pending_insurer": pending_insurer,
+        "rejected": rejected,
     })
 
 
