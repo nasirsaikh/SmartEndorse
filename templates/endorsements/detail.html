@@ -38,7 +38,7 @@
         <strong class="text-base-content">Intake:</strong> Review extracted/manual member rows. You can edit, add or remove members before submitting for validation.
       {% elif endorsement.status == "NEEDS_INFO" or endorsement.status == "REJECTED" %}
         <strong class="text-base-content">Correction required:</strong> Resolve the listed issue(s), update member/file data, then validate and resubmit.
-        {% if latest_rejection %}<div class="mt-2 rounded border border-error/20 bg-error/5 px-3 py-2 text-error"><strong>Rejection reason:</strong> {{ latest_rejection.decision_comment }}</div>{% endif %}
+        {% if latest_rejection_reason %}<div class="mt-2 rounded border border-error/20 bg-error/5 px-3 py-2 text-error"><strong>Rejection reason:</strong> {{ latest_rejection_reason }}</div>{% endif %}
       {% elif endorsement.status == "PENDING_INSURER_APPROVAL" %}
         <strong class="text-base-content">Insurance approval:</strong> The request failed an auto-approval rule or requires exception review. An authorised insurer user must approve or reject with a reason.
       {% elif endorsement.status == "AUTO_APPROVED" or endorsement.status == "SUBMITTED" %}
@@ -237,7 +237,7 @@
               <td class="whitespace-nowrap">
                 {% if can_edit %}<a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>{% endif %}
                 {% if can_delete_items %}
-                <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="inline" onsubmit="return confirm('Delete this member row? This is only allowed during validation.');">
+                <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="inline" onsubmit="return confirm('Delete this member row from the intake/correction?');">
                   {% csrf_token %}
                   <button class="btn btn-error btn-ghost btn-xs" type="submit"><i class="bi bi-trash3"></i>DELETE</button>
                 </form>
@@ -293,7 +293,7 @@
               <div class="se-file-list w-full"></div>
             </div>
             <div class="mt-3 text-right">
-              <button class="btn btn-primary btn-sm" type="submit"><span class="btn-label"><i class="bi bi-arrow-repeat"></i>APPLY & REVALIDATE</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
+              <button class="btn btn-primary btn-sm" type="submit"><span class="btn-label"><i class="bi bi-cloud-check"></i>APPLY FILES</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
             </div>
           </form>
 
