@@ -1,32 +1,22 @@
 <div class="space-y-4">
-  <section class="se-panel">
-    <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 1</div><div class="se-panel-title mt-1">INTAKE & CORRECTION</div></div>
-      <span class="se-status {% if current_step == 'intake' %}se-status-info{% else %}se-status-ok{% endif %}">{% if current_step == 'intake' %}Current step{% else %}Read-only history{% endif %}</span>
-    </div>
-    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-      <div class="text-xs leading-5 opacity-70">
-        Review extracted and manually entered members here. Correct, add or remove rows before sending the endorsement into validation.
-        {% if latest_rejection_reason %}<div class="mt-3 rounded border border-error/20 bg-error/5 px-3 py-2 text-error"><strong>Returned / rejection reason:</strong> {{ latest_rejection_reason }}</div>{% endif %}
-      </div>
-      {% if editable_intake %}
-      <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
-        {% csrf_token %}
-        <button class="btn btn-primary" type="submit"><i class="bi bi-shield-check"></i>VALIDATE & SUBMIT</button>
-      </form>
-      {% endif %}
-    </div>
-  </section>
+  {% if latest_rejection_reason %}
+  <div role="alert" class="alert alert-error">
+    <i class="bi bi-arrow-return-left"></i>
+    <div><strong>Returned for correction</strong><div class="text-xs">{{ latest_rejection_reason }}</div></div>
+  </div>
+  {% endif %}
 
-  {% include "endorsements/partials/_source_json.html" %}
   {% include "endorsements/partials/_validation_issues.html" %}
   {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=True show_tpa_controls=False %}
 
   {% if editable_intake %}
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Intake tools</div><div class="se-panel-title mt-1">FILES & MANUAL MEMBER ENTRY</div></div>
-      <span class="badge badge-outline badge-warning badge-xs">THIS ENDORSEMENT ONLY</span>
+      <div><div class="se-eyebrow">Update intake</div><div class="se-panel-title mt-1">FILES OR MANUAL ENTRY</div></div>
+      <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-shield-check"></i>VALIDATE & SUBMIT</button>
+      </form>
     </div>
     <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,.7fr)]">
       <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_supplemental_upload' endorsement.pk %}">
@@ -35,7 +25,7 @@
           <input class="portal-file-input" data-drop-input="true" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
           <div class="w-full text-center">
             <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
-            <strong class="font-mono text-xs tracking-wider">DROP CORRECTION FILES</strong>
+            <strong class="font-mono text-xs tracking-wider">DROP FILES</strong>
             <div class="mt-2 text-[10px] opacity-55">PDF/images selected together are treated as one evidence bundle, including separate front/back ID files.</div>
             <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">BROWSE FILES</button>
             <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No files selected</div>
@@ -47,8 +37,7 @@
 
       <form method="post" action="{% url 'endorsement_item_add' endorsement.pk %}" class="rounded-box border border-base-content/10 bg-base-200/50 p-4">
         {% csrf_token %}
-        <div class="se-eyebrow">Manual intake</div>
-        <div class="mt-2 text-xs font-semibold">Add another member manually</div>
+        <div class="text-xs font-semibold">Add member manually</div>
         <div class="mt-3 grid gap-2">
           <label class="se-field"><span>Full name</span>{{ add_item_form.full_name }}</label>
           <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Member no.</span>{{ add_item_form.member_no }}</label><label class="se-field"><span>Employee no.</span>{{ add_item_form.employee_no }}</label></div>
@@ -67,17 +56,14 @@
   {% if resolution_rows %}
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Correction ledger</div><div class="se-panel-title mt-1">UNIFIED BEFORE → AFTER CHANGES</div></div>
-      <span class="badge badge-ghost badge-sm">{{ resolution_rows|length }} CHANGE SET{{ resolution_rows|length|pluralize|upper }}</span>
+      <div><div class="se-eyebrow">Changes</div><div class="se-panel-title mt-1">BEFORE → AFTER</div></div>
+      <span class="badge badge-ghost badge-sm">{{ resolution_rows|length }}</span>
     </div>
     <div class="divide-y divide-base-content/10">
       {% for row in resolution_rows %}
       <div class="p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <strong class="text-xs">{{ row.description }}</strong>
-            {% if row.actor %}<span class="ml-2 text-[10px] opacity-45">by {{ row.actor.get_full_name|default:row.actor.username }}</span>{% endif %}
-          </div>
+          <div><strong class="text-xs">{{ row.description }}</strong>{% if row.actor %}<span class="ml-2 text-[10px] opacity-45">by {{ row.actor.get_full_name|default:row.actor.username }}</span>{% endif %}</div>
           <span class="font-mono text-[10px] opacity-45">{{ row.created_at|date:"d M Y H:i" }}</span>
         </div>
         <div class="mt-3 overflow-x-auto">
@@ -85,12 +71,7 @@
             <thead><tr><th>Field</th><th>Before</th><th></th><th>After</th></tr></thead>
             <tbody>
             {% for change in row.changes %}
-            <tr>
-              <td><strong>{{ change.field }}</strong></td>
-              <td class="mono opacity-55">{{ change.before }}</td>
-              <td class="w-8 text-center"><i class="bi bi-arrow-right text-primary"></i></td>
-              <td class="mono font-semibold">{{ change.after }}</td>
-            </tr>
+            <tr><td><strong>{{ change.field }}</strong></td><td class="mono opacity-55">{{ change.before }}</td><td class="w-8 text-center"><i class="bi bi-arrow-right text-primary"></i></td><td class="mono font-semibold">{{ change.after }}</td></tr>
             {% endfor %}
             </tbody>
           </table>
@@ -101,22 +82,23 @@
   </section>
   {% endif %}
 
+  {% if endorsement.attachments.all %}
   <section class="se-panel">
-    <div class="se-panel-head"><div><div class="se-eyebrow">Source registry</div><div class="se-panel-title mt-1">ATTACHMENTS</div></div></div>
+    <div class="se-panel-head"><div><div class="se-eyebrow">Files</div><div class="se-panel-title mt-1">ATTACHMENTS</div></div></div>
     <div class="overflow-x-auto">
       <table class="se-table">
-        <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Source</th></tr></thead>
+        <thead><tr><th>File</th><th>Type</th><th>Status</th></tr></thead>
         <tbody>
         {% for attachment in endorsement.attachments.all %}
         <tr>
           <td><strong>{{ attachment.original_name }}</strong></td>
           <td>{{ attachment.get_kind_display }}{% if attachment.is_supplemental %} · Supplemental{% endif %}</td>
           <td>{% if attachment.processed %}<span class="se-status se-status-ok">Processed</span>{% else %}<span class="se-status se-status-warn">Exception</span>{% endif %}</td>
-          <td><details><summary class="btn btn-ghost btn-xs">JSON</summary><pre class="se-json mt-2">{{ attachment.extracted_payload }}</pre></details></td>
         </tr>
-        {% empty %}<tr><td colspan="4" class="py-8 text-center opacity-45">No attachments.</td></tr>{% endfor %}
+        {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
+  {% endif %}
 </div>
