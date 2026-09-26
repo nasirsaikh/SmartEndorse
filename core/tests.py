@@ -412,6 +412,100 @@ class PortalValidationUXTests(BaseInsuranceTest):
         )
         revalidate_mock.assert_called_once()
 
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.process_initial_evidence_bundle")
+    def test_new_request_bundles_front_and_back_evidence(self, bundle_mock):
+        self.grant_client_access()
+        bundle_mock.return_value = {
+            "processed": 2,
+            "rows": 1,
+            "created_items": 1,
+            "warnings": [],
+        }
+        http = Client()
+        http.force_login(self.requester)
+        front = SimpleUploadedFile("ID Front.jpeg", b"front", content_type="image/jpeg")
+        back = SimpleUploadedFile("ID Back.jpeg", b"back", content_type="image/jpeg")
+
+        response = http.post(
+            "/endorsements/new/",
+            {
+                "policy": str(self.policy.pk),
+                "endorsement_type": EndorsementRequest.Type.ADDITION,
+                "effective_date": self.today.isoformat(),
+                "attachments": [front, back],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bundle_args = bundle_mock.call_args.args[0]
+        self.assertEqual(len(bundle_args), 2)
+        self.assertEqual(
+            {attachment.original_name for attachment in bundle_args},
+            {"ID Front.jpeg", "ID Back.jpeg"},
+        )
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.process_supplemental_evidence_bundle")
+    @patch("core.views.WorkflowService.revalidate_after_correction")
+    def test_retry_failed_documents_processes_existing_failures_as_one_bundle(self, revalidate_mock, bundle_mock):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        EndorsementItem.objects.create(
+            request=req,
+            full_name="Faiyz Example",
+            relationship="Employee",
+            gender="Male",
+            plan=self.plan,
+            effective_date=self.today,
+        )
+        front = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("Faiyz Id Front.jpeg", b"front", content_type="image/jpeg"),
+            original_name="Faiyz Id Front.jpeg",
+            kind=Attachment.Kind.IMAGE,
+            is_supplemental=True,
+            processed=False,
+            processing_error="old extraction error",
+        )
+        back = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("Faiyz Id Back.jpeg", b"back", content_type="image/jpeg"),
+            original_name="Faiyz Id Back.jpeg",
+            kind=Attachment.Kind.IMAGE,
+            is_supplemental=True,
+            processed=False,
+            processing_error="old extraction error",
+        )
+        bundle_mock.return_value = {
+            "processed": 2,
+            "rows": 1,
+            "result": {"updated_items": 1},
+            "warnings": [],
+        }
+
+        http = Client()
+        http.force_login(self.requester)
+        response = http.post(f"/endorsements/{req.pk}/retry-failed-evidence/")
+
+        self.assertEqual(response.status_code, 302)
+        bundle_args = bundle_mock.call_args.args[0]
+        self.assertEqual({attachment.pk for attachment in bundle_args}, {front.pk, back.pk})
+        revalidate_mock.assert_called_once()
+
     def test_member_validation_error_identifies_member(self):
         req = EndorsementRequest.objects.create(
             policy=self.policy,
