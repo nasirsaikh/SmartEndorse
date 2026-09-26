@@ -4,15 +4,16 @@
 {% block page_title %}NEW ENDORSEMENT{% endblock %}
 {% block object_tools %}<a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO PIPELINE</a>{% endblock %}
 {% block content %}
-<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="space-y-4">
+<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="space-y-4" data-source-intake>
   {% csrf_token %}
+
   {% if form.non_field_errors %}
   <div class="alert alert-error"><i class="bi bi-x-octagon"></i><div>{{ form.non_field_errors }}</div></div>
   {% endif %}
 
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 01 / Request control</div><div class="se-panel-title mt-1">POLICY & ENDORSEMENT</div></div>
+      <div><div class="se-eyebrow">Step 01 / Request context</div><div class="se-panel-title mt-1">POLICY & ENDORSEMENT</div></div>
       <span class="badge badge-outline badge-sm">REQUIRED</span>
     </div>
     <div class="se-form-grid p-4">
@@ -24,7 +25,46 @@
 
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 02 / Source intake</div><div class="se-panel-title mt-1">AI-ASSISTED MULTI-FILE INTAKE</div></div>
+      <div>
+        <div class="se-eyebrow">Step 02 / Choose source</div>
+        <div class="se-panel-title mt-1">HOW DO YOU WANT TO PROVIDE MEMBER DATA?</div>
+      </div>
+      <span class="badge badge-primary badge-outline badge-sm">CHOOSE ONE</span>
+    </div>
+
+    <div class="grid gap-3 p-4 md:grid-cols-2">
+      <button type="button" class="se-source-choice border border-primary bg-primary/10 p-5 text-left transition hover:border-primary" data-source-choice="files">
+        <div class="flex items-start gap-4">
+          <span class="grid h-11 w-11 shrink-0 place-items-center rounded-box bg-primary text-primary-content"><i class="bi bi-files text-lg"></i></span>
+          <span>
+            <strong class="block text-sm">UPLOAD FILES</strong>
+            <span class="mt-1 block text-xs leading-5 opacity-60">Excel, CSV, PDF or images. SmartEndorse extracts the members, then shows the extracted rows in Intake for review before validation.</span>
+          </span>
+        </div>
+      </button>
+
+      <button type="button" class="se-source-choice border border-base-content/15 bg-base-100 p-5 text-left transition hover:border-primary" data-source-choice="manual">
+        <div class="flex items-start gap-4">
+          <span class="grid h-11 w-11 shrink-0 place-items-center rounded-box bg-base-200 text-primary"><i class="bi bi-person-plus text-lg"></i></span>
+          <span>
+            <strong class="block text-sm">ENTER MANUALLY</strong>
+            <span class="mt-1 block text-xs leading-5 opacity-60">Enter the first member now. After the Draft is created, more members can be added, edited or removed from the Intake page.</span>
+          </span>
+        </div>
+      </button>
+    </div>
+
+    <div class="border-t border-base-content/10 bg-base-200/40 px-4 py-3 text-xs">
+      <div class="flex items-start gap-2">
+        <i class="bi bi-info-circle mt-0.5 text-info"></i>
+        <span><strong>No automatic submission at this stage.</strong> This page only creates the Draft. Intake is the review/correction step; Validation & Submit is a separate action after you are satisfied with the data.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="se-panel" data-source-panel="files">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Source / File intake</div><div class="se-panel-title mt-1">UPLOAD DOCUMENTS OR DATA FILES</div></div>
       <span class="badge badge-primary badge-outline badge-sm">XLSX · XLS · CSV · PDF · IMAGE</span>
     </div>
     <div class="p-4">
@@ -33,21 +73,25 @@
         <div class="w-full max-w-2xl text-center">
           <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
           <div class="font-mono text-sm font-bold tracking-wide">DROP SOURCE FILES HERE</div>
-          <div class="mt-2 text-xs opacity-55">or choose one or more files. PDF/images selected together are treated as one evidence bundle, so ID front/back can be separate files.</div>
+          <div class="mt-2 text-xs opacity-55">Choose one or more files. ID front and back may be uploaded as separate files in the same selection.</div>
           <button type="button" data-browse-files class="btn btn-primary btn-sm mt-4"><i class="bi bi-folder2-open"></i>BROWSE FILES</button>
           <div data-file-count class="mt-3 text-[10px] uppercase tracking-wider opacity-45">No files selected</div>
         </div>
         <div class="se-file-list w-full"></div>
       </div>
       {{ form.attachments.errors }}
-      <div class="mt-3 flex gap-2 text-xs opacity-55"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Excel/CSV are parsed as structured rows; PDF/image evidence is OCR'd and semantically combined across files/pages before member extraction.</span></div>
+      <div class="mt-3 grid gap-2 text-xs opacity-60 sm:grid-cols-3">
+        <div class="flex gap-2"><i class="bi bi-file-earmark-spreadsheet text-success"></i><span>Excel/CSV → structured rows</span></div>
+        <div class="flex gap-2"><i class="bi bi-file-earmark-image text-info"></i><span>PDF/images → OCR/evidence bundle</span></div>
+        <div class="flex gap-2"><i class="bi bi-eye text-primary"></i><span>Extracted result → reviewed in Intake</span></div>
+      </div>
     </div>
   </section>
 
-  <section class="se-panel">
+  <section class="se-panel hidden" data-source-panel="manual">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 03 / Optional entry</div><div class="se-panel-title mt-1">MANUAL MEMBER ROW</div></div>
-      <span class="badge badge-ghost badge-sm">OPTIONAL WITH FILE UPLOAD</span>
+      <div><div class="se-eyebrow">Source / Manual intake</div><div class="se-panel-title mt-1">ENTER FIRST MEMBER</div></div>
+      <span class="badge badge-ghost badge-sm">MORE CAN BE ADDED IN INTAKE</span>
     </div>
     <div class="se-form-grid p-4">
       <div class="se-field se-span-6"><label for="id_full_name">Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
@@ -65,13 +109,13 @@
 
   <div class="se-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
     <div class="flex items-start gap-3 text-xs opacity-65">
-      <i class="bi bi-lock-fill mt-0.5 text-primary"></i>
-      <span>Policy gates, duplicate checks, required fields, existing-member controls and deterministic pricing run before routing.</span>
+      <i class="bi bi-shield-check mt-0.5 text-primary"></i>
+      <span>After creation you will see the uploaded files and extracted/manual member rows in <strong>Intake</strong>. Nothing is routed to the insurer or TPA until you explicitly run <strong>Validation & Submit</strong>.</span>
     </div>
     <div class="flex shrink-0 gap-2">
       <a href="{% url 'endorsement_list' %}" class="btn btn-ghost">CANCEL</a>
       <button class="btn btn-primary" type="submit">
-        <span class="btn-label"><i class="bi bi-lightning-charge"></i>VALIDATE, PRICE & SUBMIT</span>
+        <span class="btn-label"><i class="bi bi-arrow-right-circle"></i>CREATE DRAFT & REVIEW INTAKE</span>
         <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
       </button>
     </div>
