@@ -23,6 +23,7 @@ urlpatterns = [
     path("endorsements/<int:pk>/items/<int:item_id>/tpa/", views.tpa_update_item, name="endorsement_tpa_item"),
     path("endorsements/<int:pk>/approvals/<int:approval_id>/", views.decide_approval, name="endorsement_approval"),
     path("endorsements/<int:pk>/start/", views.start_processing, name="endorsement_start"),
+    path("endorsements/<int:pk>/tpa-reject/", views.tpa_reject_request, name="endorsement_tpa_reject"),
     path("endorsements/<int:pk>/complete/", views.complete_request, name="endorsement_complete"),
     path("endorsements/<int:pk>/query/", views.raise_query, name="endorsement_query"),
     path("endorsements/<int:pk>/query/<int:query_id>/answer/", views.answer_query, name="endorsement_query_answer"),
