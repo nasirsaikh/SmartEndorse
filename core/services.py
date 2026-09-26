@@ -359,22 +359,74 @@ class FileIntakeService:
                     mapped[canonical] = value
                 else:
                     unknown_headers.add(str(key))
-            deterministic.append(mapped)
+            deterministic.append(cls._normalize_ai_row(mapped))
+
         if unknown_headers and AIService().available:
             try:
-                return [cls._normalize_ai_row(r) for r in AIService().normalize_structured_rows(raw_rows)], True
+                ai_rows = [cls._normalize_ai_row(r) for r in AIService().normalize_structured_rows(raw_rows)]
+                merged = []
+                for index, deterministic_row in enumerate(deterministic):
+                    ai_row = ai_rows[index] if index < len(ai_rows) else {}
+                    row = {"_source_raw": deterministic_row.get("_source_raw", {})}
+                    for key in CANONICAL_FIELDS:
+                        deterministic_value = deterministic_row.get(key)
+                        ai_value = ai_row.get(key)
+                        row[key] = deterministic_value if deterministic_value not in (None, "") else ai_value
+                    merged.append(cls._normalize_ai_row(row))
+                return merged, True
             except Exception:
                 pass
-        return [cls._normalize_ai_row(r) for r in deterministic], False
+        return deterministic, False
 
     @classmethod
     def _normalize_ai_row(cls, row):
-        source = row.get("_source_raw") if isinstance(row, dict) else None
-        result = {"_source_raw": json_safe(source or row)}
-        if isinstance(row, dict):
-            for key in CANONICAL_FIELDS:
-                result[key] = json_safe(row.get(key))
+        if not isinstance(row, dict):
+            return {"_source_raw": json_safe(row), **{key: None for key in CANONICAL_FIELDS}}
+
+        source = row.get("_source_raw")
+        source = source if isinstance(source, dict) else row
+        source_mapped = {}
+        for source_key, source_value in source.items():
+            canonical = cls._map_header(source_key)
+            if canonical in CANONICAL_FIELDS and source_value not in (None, ""):
+                source_mapped[canonical] = source_value
+
+        result = {"_source_raw": json_safe(source)}
+        for key in CANONICAL_FIELDS:
+            value = row.get(key)
+            if value in (None, ""):
+                value = source_mapped.get(key)
+            result[key] = json_safe(value)
+
+        result["gender"] = cls._normalize_gender(result.get("gender"))
+        result["relationship"] = cls._normalize_relationship(result.get("relationship"))
         return result
+
+    @staticmethod
+    def _normalize_gender(value):
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        key = text.lower()
+        if key in {"m", "male"}:
+            return "Male"
+        if key in {"f", "female"}:
+            return "Female"
+        return text
+
+    @staticmethod
+    def _normalize_relationship(value):
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        key = text.lower().replace("_", " ").replace("-", " ")
+        if key in {"employee", "emp", "self", "principal", "main member", "member"}:
+            return "Employee"
+        if key in {"spouse", "wife", "husband"}:
+            return "Spouse"
+        if key in {"child", "son", "daughter", "dependent child"}:
+            return "Child"
+        return text
 
     @classmethod
     def _map_header(cls, value):
@@ -408,9 +460,15 @@ class FileIntakeService:
 
     @classmethod
     def _to_item_values(cls, request_obj, row):
+        row = cls._normalize_ai_row(row)
         plan = None
         if row.get("plan_code"):
-            plan = PolicyPlan.objects.filter(policy=request_obj.policy, code__iexact=str(row["plan_code"]).strip(), is_active=True).first()
+            plan_value = str(row["plan_code"]).strip()
+            plan = PolicyPlan.objects.filter(
+                Q(code__iexact=plan_value) | Q(name__iexact=plan_value),
+                policy=request_obj.policy,
+                is_active=True,
+            ).first()
         member_no = str(row.get("member_no") or "").strip()
         existing = None
         if request_obj.endorsement_type == EndorsementRequest.Type.DELETION and member_no:
@@ -428,6 +486,37 @@ class FileIntakeService:
             "sum_assured": cls._decimal(row.get("sum_assured")) if row.get("sum_assured") not in (None, "") else (existing.sum_assured if existing else None),
             "effective_date": cls._date(row.get("effective_date")) or request_obj.effective_date,
         }
+
+    @classmethod
+    def repair_item_from_extracted_data(cls, item):
+        data = item.extracted_data if isinstance(item.extracted_data, dict) else {}
+        normalized = data.get("normalized") if isinstance(data.get("normalized"), dict) else {}
+        source_raw = data.get("source_raw") if isinstance(data.get("source_raw"), dict) else {}
+        row = dict(normalized)
+        if source_raw:
+            row["_source_raw"] = source_raw
+        row = cls._normalize_ai_row(row or source_raw)
+        values = cls._to_item_values(item.request, row)
+
+        editable = (
+            "member_no", "employee_no", "national_id", "full_name", "relationship",
+            "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date",
+        )
+        changed = {}
+        for field in editable:
+            current = getattr(item, field)
+            value = values.get(field)
+            if current in (None, "") and value not in (None, ""):
+                setattr(item, field, value)
+                changed[field] = json_safe(value.pk if field == "plan" and value else value)
+
+        if changed:
+            item.resolution_data = {
+                **(item.resolution_data or {}),
+                "source_recovery": {"fields": changed, "source": "stored_extraction_json"},
+            }
+            item.save()
+        return changed
 
     @classmethod
     def _create_items(cls, request_obj, rows, attachment):
@@ -662,6 +751,15 @@ class ValidationService:
         if policy.product == Policy.Product.GROUP_MEDICAL and not policy.tpa_id:
             errors.append("Group Medical policy has no TPA configured.")
         items = list(request_obj.items.select_related("plan"))
+        for item in items:
+            recovered = FileIntakeService.repair_item_from_extracted_data(item)
+            if recovered:
+                WorkflowEvent.objects.create(
+                    request=request_obj,
+                    event_type="SOURCE_DATA_RECOVERED",
+                    description=f"Item {item.pk} recovered from stored extraction JSON before validation.",
+                    payload=json_safe({"item_id": item.pk, "filled": recovered}),
+                )
         if not items:
             errors.append("No endorsement member rows were provided or extracted. Nothing will be processed.")
         if request_obj.endorsement_type == EndorsementRequest.Type.ADDITION:
