@@ -29,15 +29,15 @@
 </head>
 <body class="min-h-screen bg-base-200 text-base-content" hx-boost="true">
 {% if user.is_authenticated %}
-<div class="drawer lg:drawer-open min-h-screen">
+<div class="drawer min-h-screen">
   <input id="portal-drawer" type="checkbox" class="drawer-toggle">
 
   <div class="drawer-content flex min-w-0 flex-col">
     <header class="se-topbar sticky top-0 z-40 border-b border-base-content/10 bg-base-100/95 backdrop-blur">
       <div class="navbar min-h-14 px-3 lg:px-5">
         <div class="navbar-start gap-2">
-          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm lg:hidden" aria-label="Open navigation">
-            <i class="bi bi-list text-xl"></i>
+          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm" aria-label="Open navigation" title="Open navigation">
+            <i class="bi bi-layout-sidebar-inset text-lg"></i>
           </label>
           <div class="hidden sm:flex items-center gap-3">
             <span class="status status-success animate-pulse"></span>
@@ -46,11 +46,14 @@
           </div>
         </div>
 
-        <div class="navbar-center hidden xl:flex">
-          <div class="se-command-chip">
-            <i class="bi bi-shield-check"></i>
-            <span>GROUP INSURANCE OPERATIONS</span>
-          </div>
+        <div class="navbar-center hidden flex-1 justify-center px-4 md:flex">
+          <form method="get" action="{% url 'endorsement_list' %}" class="w-full max-w-xl">
+            <label class="input input-sm input-bordered flex w-full items-center gap-2 bg-base-200/60">
+              <i class="bi bi-search opacity-45"></i>
+              <input type="search" name="q" class="grow" placeholder="Global search: request, policy, client, member, Civil ID..." aria-label="Global search">
+              <kbd class="kbd kbd-xs hidden xl:inline-flex">ENTER</kbd>
+            </label>
+          </form>
         </div>
 
         <div class="navbar-end gap-1">
@@ -75,29 +78,9 @@
             </div>
           </div>
 
-          <div class="dropdown dropdown-end">
-            <button tabindex="0" class="btn btn-ghost btn-square btn-sm" type="button" aria-label="Appearance">
-              <i class="bi bi-circle-half text-lg"></i>
-            </button>
-            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-64 rounded-box border border-base-content/10 bg-base-100 p-4 shadow-2xl">
-              <div class="mb-3">
-                <div class="text-xs font-bold uppercase tracking-wider opacity-60">Appearance</div>
-                <div class="mt-1 text-sm">Light, dark, or follow your device.</div>
-              </div>
-              <form hx-post="{% url 'set_preferences' %}" hx-swap="none" id="appearance-form" class="space-y-3">
-                {% csrf_token %}
-                <select class="select select-bordered select-sm w-full" name="color_mode" id="color-mode-select">
-                  {% for value,label in color_modes %}
-                  <option value="{{ value }}" {% if current_profile.color_mode == value %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-                <button class="btn btn-primary btn-sm w-full" type="submit">
-                  <span class="btn-label">Apply theme</span>
-                  <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
-                </button>
-              </form>
-            </div>
-          </div>
+          <button id="theme-toggle" class="btn btn-ghost btn-square btn-sm" type="button" aria-label="Toggle light and dark mode" title="Toggle light / dark mode">
+            <i id="theme-toggle-icon" class="bi bi-sun text-lg"></i>
+          </button>
 
           <div class="dropdown dropdown-end">
             <button tabindex="0" class="btn btn-ghost h-auto min-h-0 gap-2 px-2 py-1.5" type="button">
