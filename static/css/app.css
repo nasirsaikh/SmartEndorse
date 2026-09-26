@@ -55,7 +55,7 @@ body{
   padding:.65rem .8rem;border-bottom:1px solid var(--se-line);background:var(--color-base-200);
   text-align:left;font-size:.57rem;font-weight:800;text-transform:uppercase;letter-spacing:.14em;opacity:.65;white-space:nowrap
 }
-.se-table td{padding:.72rem .8rem;border-bottom:1px solid var(--se-line);vertical-align:middle}
+.se-table td{padding:.72rem .8rem;border-bottom:1px solid var(--se-line);vertical-align:middle;white-space:nowrap}
 .se-table tbody tr{transition:background .15s ease}
 .se-table tbody tr:hover{background:var(--se-soft)}
 .se-table tbody tr:last-child td{border-bottom:0}
@@ -110,7 +110,8 @@ body{
 .se-timeline-item{display:grid;grid-template-columns:8rem minmax(0,1fr);gap:1rem;border-bottom:1px solid var(--se-line);padding:.85rem 1rem}
 .se-timeline-item:last-child{border-bottom:0}
 
-.plotly-graph-div{width:100%!important}
+.plotly-graph-div{width:100%!important;max-width:100%!important;min-height:280px}
+.se-chart-shell{min-width:0;overflow:hidden}
 .js-plotly-plot .plotly .modebar{display:none!important}
 
 #toast-container .alert{min-width:min(24rem,calc(100vw - 2rem));box-shadow:0 16px 40px rgba(0,0,0,.22)}
