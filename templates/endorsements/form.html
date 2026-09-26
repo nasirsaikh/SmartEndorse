@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}New Endorsement | SmartEndorse{% endblock %}
+{% block page_title %}New Endorsement Request{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" enctype="multipart/form-data" class="panel p-4">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="section-title">1. Policy & effective date</div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><label class="form-label">Policy</label>{{ form.policy }}{{ form.policy.errors }}</div>
+        <div class="col-md-3"><label class="form-label">Type</label>{{ form.endorsement_type }}{{ form.endorsement_type.errors }}</div>
+        <div class="col-md-3"><label class="form-label">Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
+      </div>
+
+      <div class="section-title">2. Manual member row <span class="text-secondary fw-normal">optional when uploading a file</span></div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><label class="form-label">Full name</label>{{ form.full_name }}</div>
+        <div class="col-md-3"><label class="form-label">Member no.</label>{{ form.member_no }}</div>
+        <div class="col-md-3"><label class="form-label">Employee no.</label>{{ form.employee_no }}</div>
+        <div class="col-md-4"><label class="form-label">Civil / National ID</label>{{ form.national_id }}</div>
+        <div class="col-md-4"><label class="form-label">Relationship</label>{{ form.relationship }}</div>
+        <div class="col-md-4"><label class="form-label">Date of birth</label>{{ form.date_of_birth }}</div>
+        <div class="col-md-4"><label class="form-label">Gender</label>{{ form.gender }}</div>
+        <div class="col-md-4"><label class="form-label">Plan</label>{{ form.plan }}</div>
+        <div class="col-md-4"><label class="form-label">Annual salary</label>{{ form.annual_salary }}</div>
+        <div class="col-md-4"><label class="form-label">Sum assured</label>{{ form.sum_assured }}</div>
+      </div>
+
+      <div class="section-title">3. AI-assisted bulk intake</div>
+      <div class="upload-zone mb-4">
+        <div class="fw-semibold mb-1">Upload Excel, CSV, PDF or images</div>
+        <div class="small text-secondary mb-3">Structured spreadsheets are parsed deterministically. PDFs/images are sent to the active AI provider for field extraction.</div>
+        {{ form.attachments }}
+        {{ form.attachments.errors }}
+      </div>
+
+      <div class="d-flex gap-2 justify-content-end">
+        <a href="{% url 'endorsement_list' %}" class="btn btn-light">Cancel</a>
+        <button class="btn btn-primary px-4">Validate, price & submit</button>
+      </div>
+    </form>
+  </div>
+  <div class="col-xl-4">
+    <div class="panel p-4 sticky-xl-top" style="top:24px">
+      <div class="eyebrow text-primary">WHAT HAPPENS NEXT</div>
+      <h3 class="h5">Automated seven-step flow</h3>
+      <ol class="workflow-steps">
+        <li><span>1</span><div><strong>Intake</strong><small>Manual, Excel, PDF or image</small></div></li>
+        <li><span>2</span><div><strong>Extract</strong><small>AI structures unstructured documents</small></div></li>
+        <li><span>3</span><div><strong>Validate</strong><small>Policy rules and mandatory fields</small></div></li>
+        <li><span>4</span><div><strong>Price</strong><small>Deterministic pro-rata engine</small></div></li>
+        <li><span>5</span><div><strong>STP decision</strong><small>Clean cases bypass insurer handling</small></div></li>
+        <li><span>6</span><div><strong>Route</strong><small>Medical to TPA; life to insurer core</small></div></li>
+        <li><span>7</span><div><strong>Track & close</strong><small>SLA, queries, completion notification</small></div></li>
+      </ol>
+    </div>
+  </div>
+</div>
+{% endblock %}

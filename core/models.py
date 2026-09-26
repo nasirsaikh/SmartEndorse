@@ -1,0 +1,336 @@
+import uuid
+from decimal import Decimal
+from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator
+from django.db import models
+from django.utils import timezone
+
+
+def default_weekend_days():
+    return [4, 5]
+
+
+class TimeStampedModel(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        abstract = True
+
+
+class Organization(TimeStampedModel):
+    class Type(models.TextChoices):
+        INSURER = "INSURER", "Insurance Company"
+        CLIENT = "CLIENT", "Direct Client"
+        BROKER = "BROKER", "Broker"
+        AGENT = "AGENT", "Agent"
+        CHANNEL = "CHANNEL", "Channel Partner"
+        TPA = "TPA", "TPA"
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=50, unique=True)
+    organization_type = models.CharField(max_length=20, choices=Type.choices)
+    notification_email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class UserProfile(TimeStampedModel):
+    class Role(models.TextChoices):
+        SUPER_ADMIN = "SUPER_ADMIN", "Super Admin"
+        INSURER_ADMIN = "INSURER_ADMIN", "Insurer Admin"
+        INSURER_MANAGER = "INSURER_MANAGER", "Insurer Manager"
+        INSURER_SUPERVISOR = "INSURER_SUPERVISOR", "Insurer Supervisor"
+        INSURER_STAFF = "INSURER_STAFF", "Insurer Staff"
+        UNDERWRITER = "UNDERWRITER", "Underwriter"
+        CLIENT_ADMIN = "CLIENT_ADMIN", "Client Admin"
+        REQUESTER = "REQUESTER", "Client Requester"
+        CLIENT_VIEWER = "CLIENT_VIEWER", "Client Viewer"
+        BROKER_ADMIN = "BROKER_ADMIN", "Broker Admin"
+        BROKER_USER = "BROKER_USER", "Broker User"
+        AGENT = "AGENT", "Agent"
+        CHANNEL_PARTNER = "CHANNEL_PARTNER", "Channel Partner"
+        TPA_ADMIN = "TPA_ADMIN", "TPA Admin"
+        TPA_MANAGER = "TPA_MANAGER", "TPA Manager"
+        TPA_PROCESSOR = "TPA_PROCESSOR", "TPA Processor"
+        TPA_VIEWER = "TPA_VIEWER", "TPA Viewer"
+        AUDITOR = "AUDITOR", "Auditor"
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="users")
+    role = models.CharField(max_length=30, choices=Role.choices)
+    job_title = models.CharField(max_length=120, blank=True)
+    phone = models.CharField(max_length=40, blank=True)
+    can_override_workflow = models.BooleanField(default=False)
+    def __str__(self):
+        return f"{self.user.username} / {self.get_role_display()}"
+
+
+class PlatformConfiguration(TimeStampedModel):
+    name = models.CharField(max_length=80, default="Default", unique=True)
+    auto_stp_enabled = models.BooleanField(default=True, verbose_name="Enable straight-through processing")
+    default_currency = models.CharField(max_length=3, default="OMR")
+    maximum_upload_mb = models.PositiveSmallIntegerField(default=10)
+    weekend_days = models.JSONField(default=default_weekend_days, help_text="Python weekday numbers; Oman default Friday/Saturday = 4,5")
+    require_ai_for_unstructured_uploads = models.BooleanField(default=False)
+    enable_email_notifications = models.BooleanField(default=True)
+    enable_sla_escalations = models.BooleanField(default=True)
+    support_email = models.EmailField(blank=True)
+    settings_json = models.JSONField(default=dict, blank=True)
+    def __str__(self):
+        return self.name
+
+
+class AIProviderConfig(TimeStampedModel):
+    class Provider(models.TextChoices):
+        OLLAMA = "OLLAMA", "Ollama / Llama"
+        OPENAI = "OPENAI", "OpenAI"
+        ANTHROPIC = "ANTHROPIC", "Anthropic Claude"
+        OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE", "OpenAI-compatible API"
+    name = models.CharField(max_length=100)
+    provider = models.CharField(max_length=30, choices=Provider.choices)
+    model_name = models.CharField(max_length=150)
+    base_url = models.URLField(blank=True)
+    api_key = models.TextField(blank=True, help_text="For production prefer a secret manager. Admin access to this model should be tightly restricted.")
+    temperature = models.DecimalField(max_digits=3, decimal_places=2, default=Decimal("0.00"))
+    timeout_seconds = models.PositiveIntegerField(default=120)
+    is_active = models.BooleanField(default=False)
+    supports_vision = models.BooleanField(default=False)
+    options = models.JSONField(default=dict, blank=True)
+    def __str__(self):
+        return f"{self.name} ({self.provider}: {self.model_name})"
+
+
+class SLAProfile(TimeStampedModel):
+    class Stage(models.TextChoices):
+        CLIENT_RESPONSE = "CLIENT_RESPONSE", "Client response"
+        INSURER_REVIEW = "INSURER_REVIEW", "Insurer review"
+        TPA_PROCESSING = "TPA_PROCESSING", "TPA processing"
+        QUERY_RESPONSE = "QUERY_RESPONSE", "Query response"
+        CORE_PROCESSING = "CORE_PROCESSING", "Core-system processing"
+    name = models.CharField(max_length=120)
+    stage = models.CharField(max_length=30, choices=Stage.choices)
+    target_hours = models.PositiveIntegerField(default=24)
+    warning_hours = models.PositiveIntegerField(default=4)
+    business_hours_only = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    def __str__(self):
+        return f"{self.name} - {self.get_stage_display()} ({self.target_hours}h)"
+
+
+class Policy(TimeStampedModel):
+    class Product(models.TextChoices):
+        GROUP_MEDICAL = "GROUP_MEDICAL", "Group Medical"
+        GROUP_LIFE = "GROUP_LIFE", "Group Life"
+    class RatingMethod(models.TextChoices):
+        FLAT_ANNUAL = "FLAT_ANNUAL", "Flat annual / plan rate"
+        PER_MILLE_SUM_ASSURED = "PER_MILLE_SUM_ASSURED", "Per mille of sum assured"
+        PERCENT_OF_SALARY = "PERCENT_OF_SALARY", "Percent of annual salary"
+    policy_number = models.CharField(max_length=80, unique=True)
+    policy_name = models.CharField(max_length=200)
+    product = models.CharField(max_length=30, choices=Product.choices)
+    insurer = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="insured_policies", limit_choices_to={"organization_type": Organization.Type.INSURER})
+    client = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="client_policies", limit_choices_to={"organization_type": Organization.Type.CLIENT})
+    tpa = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="tpa_policies", null=True, blank=True, limit_choices_to={"organization_type": Organization.Type.TPA})
+    broker_code = models.CharField(max_length=50, blank=True)
+    agent_code = models.CharField(max_length=50, blank=True)
+    channel_code = models.CharField(max_length=50, blank=True)
+    effective_from = models.DateField()
+    effective_to = models.DateField()
+    currency = models.CharField(max_length=3, default="OMR")
+    rating_method = models.CharField(max_length=40, choices=RatingMethod.choices, default=RatingMethod.FLAT_ANNUAL)
+    rating_parameters = models.JSONField(default=dict, blank=True, help_text="Examples: rate_per_mille, salary_percent, default_annual_rate")
+    required_fields_addition = models.JSONField(default=list, blank=True)
+    required_fields_deletion = models.JSONField(default=list, blank=True)
+    mandatory_documents_addition = models.JSONField(default=list, blank=True)
+    mandatory_documents_deletion = models.JSONField(default=list, blank=True)
+    day_count_basis = models.PositiveSmallIntegerField(default=365)
+    allow_backdated_days = models.PositiveSmallIntegerField(default=0)
+    auto_stp = models.BooleanField(default=True)
+    insurer_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="insurer_policies")
+    tpa_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="tpa_policies")
+    client_query_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="query_policies")
+    is_active = models.BooleanField(default=True)
+    def __str__(self):
+        return f"{self.policy_number} - {self.policy_name}"
+
+
+class PolicyPlan(TimeStampedModel):
+    policy = models.ForeignKey(Policy, on_delete=models.CASCADE, related_name="plans")
+    code = models.CharField(max_length=40)
+    name = models.CharField(max_length=120)
+    annual_rate = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))])
+    relationship_rates = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["policy", "code"], name="uq_policy_plan_code")]
+    def __str__(self):
+        return f"{self.policy.policy_number} / {self.code}"
+
+
+class PolicyAccess(TimeStampedModel):
+    policy = models.ForeignKey(Policy, on_delete=models.CASCADE, related_name="access_grants")
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="policy_access")
+    can_create = models.BooleanField(default=True)
+    can_view_premium = models.BooleanField(default=True)
+    can_view_members = models.BooleanField(default=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["policy", "organization"], name="uq_policy_org_access")]
+    def __str__(self):
+        return f"{self.organization.code} -> {self.policy.policy_number}"
+
+
+class PolicyMember(TimeStampedModel):
+    policy = models.ForeignKey(Policy, on_delete=models.CASCADE, related_name="members")
+    member_no = models.CharField(max_length=80)
+    employee_no = models.CharField(max_length=80, blank=True)
+    national_id = models.CharField(max_length=80, blank=True)
+    full_name = models.CharField(max_length=200)
+    relationship = models.CharField(max_length=50, default="Employee")
+    date_of_birth = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True)
+    plan = models.ForeignKey(PolicyPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="members")
+    annual_salary = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    sum_assured = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    coverage_from = models.DateField(null=True, blank=True)
+    coverage_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["policy", "member_no"], name="uq_policy_member_no")]
+    def __str__(self):
+        return f"{self.member_no} - {self.full_name}"
+
+
+class IntegrationEndpoint(TimeStampedModel):
+    class OwnerType(models.TextChoices):
+        INSURER_CORE = "INSURER_CORE", "Insurer core system"
+        TPA = "TPA", "TPA"
+    class Transport(models.TextChoices):
+        API = "API", "REST API"
+        EMAIL = "EMAIL", "Email"
+    name = models.CharField(max_length=120)
+    owner_type = models.CharField(max_length=20, choices=OwnerType.choices)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="integration_endpoints")
+    product = models.CharField(max_length=30, choices=Policy.Product.choices, blank=True)
+    transport = models.CharField(max_length=20, choices=Transport.choices)
+    endpoint_url = models.URLField(blank=True)
+    recipient_email = models.EmailField(blank=True)
+    auth_headers = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True)
+    def __str__(self):
+        return self.name
+
+
+class EndorsementRequest(TimeStampedModel):
+    class Type(models.TextChoices):
+        ADDITION = "ADDITION", "Addition"
+        DELETION = "DELETION", "Deletion"
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        VALIDATING = "VALIDATING", "Validating"
+        NEEDS_INFO = "NEEDS_INFO", "Needs information"
+        SUBMITTED = "SUBMITTED", "Submitted"
+        AUTO_APPROVED = "AUTO_APPROVED", "Auto approved"
+        SENT_TO_TPA = "SENT_TO_TPA", "Sent to TPA"
+        TPA_IN_PROGRESS = "TPA_IN_PROGRESS", "TPA in progress"
+        TPA_QUERY = "TPA_QUERY", "TPA query"
+        CORE_DISPATCHED = "CORE_DISPATCHED", "Dispatched to insurer core"
+        COMPLETED = "COMPLETED", "Completed"
+        REJECTED = "REJECTED", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
+        FAILED = "FAILED", "Automation failed"
+    reference = models.CharField(max_length=32, unique=True, editable=False)
+    policy = models.ForeignKey(Policy, on_delete=models.PROTECT, related_name="endorsements")
+    endorsement_type = models.CharField(max_length=20, choices=Type.choices)
+    effective_date = models.DateField()
+    requester = models.ForeignKey(User, on_delete=models.PROTECT, related_name="endorsement_requests")
+    requester_organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="endorsement_requests")
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
+    stp_eligible = models.BooleanField(default=False)
+    validation_score = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    validation_errors = models.JSONField(default=list, blank=True)
+    ai_summary = models.TextField(blank=True)
+    premium_impact = models.DecimalField(max_digits=16, decimal_places=3, default=Decimal("0.000"))
+    currency = models.CharField(max_length=3, default="OMR")
+    current_sla_due_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    external_reference = models.CharField(max_length=120, blank=True)
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_endorsements")
+    metadata = models.JSONField(default=dict, blank=True)
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"END-{timezone.now():%Y%m}-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+    @property
+    def sla_breached(self):
+        return bool(self.current_sla_due_at and self.status not in {self.Status.COMPLETED, self.Status.CANCELLED, self.Status.REJECTED} and timezone.now() > self.current_sla_due_at)
+    def __str__(self):
+        return self.reference
+
+
+class EndorsementItem(TimeStampedModel):
+    request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="items")
+    member_no = models.CharField(max_length=80, blank=True)
+    employee_no = models.CharField(max_length=80, blank=True)
+    national_id = models.CharField(max_length=80, blank=True)
+    full_name = models.CharField(max_length=200, blank=True)
+    relationship = models.CharField(max_length=50, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True)
+    plan = models.ForeignKey(PolicyPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="endorsement_items")
+    annual_salary = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    sum_assured = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    effective_date = models.DateField(null=True, blank=True)
+    extracted_data = models.JSONField(default=dict, blank=True)
+    validation_errors = models.JSONField(default=list, blank=True)
+    annual_premium = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
+    prorata_factor = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0.000000"))
+    premium_impact = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
+    def __str__(self):
+        return self.full_name or self.member_no or f"Item {self.pk}"
+
+
+class Attachment(TimeStampedModel):
+    class Kind(models.TextChoices):
+        EXCEL = "EXCEL", "Excel / CSV"
+        PDF = "PDF", "PDF"
+        IMAGE = "IMAGE", "Image"
+        OTHER = "OTHER", "Other"
+    request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to="endorsements/%Y/%m/")
+    original_name = models.CharField(max_length=255)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.OTHER)
+    processed = models.BooleanField(default=False)
+    processing_error = models.TextField(blank=True)
+    extracted_payload = models.JSONField(default=dict, blank=True)
+    def __str__(self):
+        return self.original_name
+
+
+class EndorsementQuery(TimeStampedModel):
+    request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="queries")
+    raised_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="raised_endorsement_queries")
+    assigned_organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="endorsement_queries")
+    subject = models.CharField(max_length=200)
+    message = models.TextField()
+    response = models.TextField(blank=True)
+    responded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="answered_endorsement_queries")
+    due_at = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    is_closed = models.BooleanField(default=False)
+    def __str__(self):
+        return f"{self.request.reference}: {self.subject}"
+
+
+class WorkflowEvent(TimeStampedModel):
+    request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="events")
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="endorsement_events")
+    event_type = models.CharField(max_length=80)
+    from_status = models.CharField(max_length=30, blank=True)
+    to_status = models.CharField(max_length=30, blank=True)
+    description = models.TextField(blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    class Meta:
+        ordering = ["-created_at"]
+    def __str__(self):
+        return f"{self.request.reference} / {self.event_type}"

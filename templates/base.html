@@ -1,0 +1,71 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SmartEndorse{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <script src="https://unpkg.com/htmx.org@2.0.7"></script>
+  <script src="https://cdn.plot.ly/plotly-3.1.1.min.js"></script>
+</head>
+<body>
+{% if user.is_authenticated %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="{% url 'dashboard' %}">
+      <span class="brand-mark">SE</span>
+      <span>
+        <strong>SmartEndorse</strong>
+        <small>Autonomous endorsements</small>
+      </span>
+    </a>
+    <nav class="nav flex-column gap-1 mt-4">
+      <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+      <a class="nav-link" href="{% url 'endorsement_list' %}">Endorsements</a>
+      <a class="nav-link" href="{% url 'endorsement_create' %}">New request</a>
+      {% if user.is_staff %}
+      <a class="nav-link" href="/admin/">Administration</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-footer">
+      {% if current_profile %}
+      <div class="small text-secondary-emphasis">{{ current_profile.organization.name }}</div>
+      <div class="small text-secondary">{{ current_profile.get_role_display }}</div>
+      {% endif %}
+      <form method="post" action="{% url 'logout' %}" class="mt-2">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-outline-light w-100">Sign out</button>
+      </form>
+    </div>
+  </aside>
+  <main class="content">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">GROUP INSURANCE OPERATIONS</div>
+        <h1 class="h4 mb-0">{% block page_title %}SmartEndorse{% endblock %}</h1>
+      </div>
+      <div class="user-chip">
+        <span class="avatar">{{ user.username|slice:":1"|upper }}</span>
+        <span>{{ user.get_full_name|default:user.username }}</span>
+      </div>
+    </header>
+
+    {% if messages %}
+      <div class="mb-3">
+      {% for message in messages %}
+        <div class="alert alert-{{ message.tags|default:'info' }} shadow-sm">{{ message }}</div>
+      {% endfor %}
+      </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% block unauthenticated %}{% endblock %}
+{% endif %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

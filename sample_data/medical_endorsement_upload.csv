@@ -1,0 +1,3 @@
+member_no,employee_no,national_id,full_name,relationship,date_of_birth,gender,plan code,annual_salary,sum_assured,effective_date
+,E1101,DEMO2101,Mariam Al Hinai,Employee,1994-04-08,Female,GOLD,10800,,2026-09-15
+,E1101-1,DEMO2102,Sara Al Hinai,Child,2018-09-22,Female,GOLD,,,2026-09-15

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Endorsements | SmartEndorse{% endblock %}
+{% block page_title %}Endorsement Pipeline{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-heading flex-wrap gap-3">
+    <form class="row g-2 flex-grow-1"
+          hx-get="{% url 'endorsement_list' %}"
+          hx-target="#request-table"
+          hx-push-url="true"
+          hx-trigger="change, keyup changed delay:350ms from:#search-q">
+      <div class="col-lg-5"><input id="search-q" name="q" value="{{ q }}" class="form-control" placeholder="Search reference, policy or client"></div>
+      <div class="col-lg-3">
+        <select name="status" class="form-select">
+          <option value="">All statuses</option>
+          {% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <select name="product" class="form-select">
+          <option value="">All products</option>
+          {% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+    </form>
+    <a class="btn btn-primary" href="{% url 'endorsement_create' %}">New endorsement</a>
+  </div>
+  <div id="request-table">{% include "endorsements/_table.html" %}</div>
+</div>
+{% endblock %}

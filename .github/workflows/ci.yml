@@ -1,0 +1,30 @@
+name: SmartEndorse CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SECRET_KEY: ci-secret
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: localhost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Generate initial migration for validation
+        run: |
+          python manage.py makemigrations core --noinput
+          echo "----- GENERATED MIGRATION START -----"
+          cat core/migrations/0001_initial.py
+          echo "----- GENERATED MIGRATION END -----"
+      - run: python manage.py migrate --noinput
+      - run: python manage.py check
+      - run: python manage.py test
