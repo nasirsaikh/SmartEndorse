@@ -3,38 +3,108 @@
     document.cookie.split(";").map(v => v.trim()).find(v => v.startsWith(name + "="))
       ?.split("=").slice(1).join("=") || "";
 
-  window.fileDropzone = () => ({
-    files: [],
-    dragging: false,
-    addFiles(list) {
-      const merged = [...this.files];
-      [...list].forEach(file => {
-        const exists = merged.some(x =>
-          x.name === file.name && x.size === file.size && x.lastModified === file.lastModified
-        );
-        if (!exists) merged.push(file);
+  const humanSize = (size) => {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  function mergeFiles(current, incoming) {
+    const merged = [...current];
+    [...incoming].forEach(file => {
+      const duplicate = merged.some(existing =>
+        existing.name === file.name &&
+        existing.size === file.size &&
+        existing.lastModified === file.lastModified
+      );
+      if (!duplicate) merged.push(file);
+    });
+    return merged;
+  }
+
+  function assignFiles(input, files) {
+    const transfer = new DataTransfer();
+    files.forEach(file => transfer.items.add(file));
+    input.files = transfer.files;
+  }
+
+  function renderDropzone(zone, input, files) {
+    const list = zone.querySelector(".se-file-list");
+    const count = zone.querySelector("[data-file-count]");
+    if (count) count.textContent = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "No files selected";
+    if (!list) return;
+
+    list.innerHTML = "";
+    files.forEach((file, index) => {
+      const row = document.createElement("div");
+      row.className = "se-file-row";
+      row.innerHTML = `
+        <div class="min-w-0">
+          <div class="se-file-row-name"></div>
+          <div class="se-file-row-meta"></div>
+        </div>
+        <button type="button" class="btn btn-error btn-ghost btn-xs" aria-label="Remove file">
+          <i class="bi bi-x-lg"></i>
+        </button>`;
+      row.querySelector(".se-file-row-name").textContent = file.name;
+      row.querySelector(".se-file-row-meta").textContent = humanSize(file.size);
+      row.querySelector("button").addEventListener("click", event => {
+        event.stopPropagation();
+        const next = files.filter((_, i) => i !== index);
+        zone._files = next;
+        assignFiles(input, next);
+        renderDropzone(zone, input, next);
       });
-      this.files = merged;
-      this.sync();
-    },
-    removeFile(index) {
-      this.files.splice(index, 1);
-      this.files = [...this.files];
-      this.sync();
-    },
-    sync() {
-      const input = this.$refs.fileInput || this.$root.querySelector('input[type="file"]');
+      list.appendChild(row);
+    });
+  }
+
+  function initDropzones(root = document) {
+    root.querySelectorAll(".se-dropzone").forEach(zone => {
+      if (zone.dataset.dropzoneReady === "1") return;
+      const input = zone.querySelector('input[type="file"]') || zone.closest("form")?.querySelector('input[type="file"][data-drop-input]');
       if (!input) return;
-      const dt = new DataTransfer();
-      this.files.forEach(file => dt.items.add(file));
-      input.files = dt.files;
-    },
-    humanSize(size) {
-      if (size < 1024) return `${size} B`;
-      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-    }
-  });
+
+      zone.dataset.dropzoneReady = "1";
+      zone._files = [...input.files];
+      renderDropzone(zone, input, zone._files);
+
+      zone.addEventListener("click", event => {
+        if (event.target.closest("button,a,input,label")) return;
+        input.click();
+      });
+      zone.querySelectorAll("[data-browse-files]").forEach(trigger => {
+        trigger.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          input.click();
+        });
+      });
+
+      input.addEventListener("change", () => {
+        zone._files = mergeFiles(zone._files || [], input.files);
+        assignFiles(input, zone._files);
+        renderDropzone(zone, input, zone._files);
+      });
+
+      ["dragenter", "dragover"].forEach(name => zone.addEventListener(name, event => {
+        event.preventDefault();
+        event.stopPropagation();
+        zone.classList.add("is-dragging");
+      }));
+      ["dragleave", "drop"].forEach(name => zone.addEventListener(name, event => {
+        event.preventDefault();
+        event.stopPropagation();
+        zone.classList.remove("is-dragging");
+      }));
+      zone.addEventListener("drop", event => {
+        if (!event.dataTransfer?.files?.length) return;
+        zone._files = mergeFiles(zone._files || [], event.dataTransfer.files);
+        assignFiles(input, zone._files);
+        renderDropzone(zone, input, zone._files);
+      });
+    });
+  }
 
   function initSelects(root = document) {
     root.querySelectorAll("select.searchable-select").forEach(select => {
@@ -47,7 +117,10 @@
         allowEmptyOption: true,
         maxOptions: 500,
         plugins: ["dropdown_input"],
-        placeholder: select.dataset.placeholder || "Search…"
+        placeholder: select.dataset.placeholder || "Search…",
+        onDropdownOpen() {
+          this.positionDropdown();
+        }
       });
     });
   }
@@ -55,22 +128,21 @@
   function loadingButton(elt) {
     if (!elt) return null;
     if (elt.matches?.('button, input[type="submit"]')) return elt;
-    if (elt.tagName === "FORM") {
-      return elt._submitter || elt.querySelector('button[type="submit"], input[type="submit"]');
-    }
+    if (elt.tagName === "FORM") return elt._submitter || elt.querySelector('button[type="submit"],input[type="submit"]');
     const form = elt.closest?.("form");
-    return form?._submitter || form?.querySelector('button[type="submit"], input[type="submit"]');
+    return form?._submitter || form?.querySelector('button[type="submit"],input[type="submit"]');
   }
 
   function startSpinner(button) {
     if (!button || button.dataset.loadingActive === "1") return;
     button.dataset.loadingActive = "1";
     button.disabled = true;
-    button.classList.add("is-loading");
-
-    if (!button.querySelector?.(".portal-spinner")) {
+    button.classList.add("btn-disabled");
+    button.querySelector(".btn-label")?.classList.add("opacity-60");
+    button.querySelector(".btn-spinner")?.classList.remove("hidden");
+    if (!button.querySelector(".btn-spinner")) {
       button.dataset.originalHtml = button.innerHTML;
-      button.innerHTML = '<span class="btn-label">Processing…</span><span class="portal-spinner" aria-hidden="true"></span>';
+      button.innerHTML = '<span class="loading loading-spinner loading-xs"></span><span>Processing…</span>';
     }
   }
 
@@ -78,30 +150,63 @@
     if (!button || button.dataset.loadingActive !== "1") return;
     if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
     button.disabled = false;
-    button.classList.remove("is-loading");
+    button.classList.remove("btn-disabled");
+    button.querySelector(".btn-label")?.classList.remove("opacity-60");
+    button.querySelector(".btn-spinner")?.classList.add("hidden");
     delete button.dataset.loadingActive;
     delete button.dataset.originalHtml;
   }
 
-  function showClientToast(title, message, level = "success") {
-    const host = document.getElementById("portal-toast-container");
+  function showToast(title, message, level = "success") {
+    const host = document.getElementById("toast-container");
     if (!host) return;
-    const toast = document.createElement("div");
-    toast.className = `portal-toast ${level}`;
-    const heading = document.createElement("strong");
-    const body = document.createElement("div");
-    heading.textContent = title;
-    body.textContent = message;
-    toast.append(heading, body);
-    host.appendChild(toast);
-    window.setTimeout(() => toast.remove(), 5000);
+    const item = document.createElement("div");
+    const alertClass = level === "error" ? "alert-error" : level === "warning" ? "alert-warning" : level === "info" ? "alert-info" : "alert-success";
+    item.className = `alert ${alertClass}`;
+    const wrapper = document.createElement("div");
+    const strong = document.createElement("strong");
+    const text = document.createElement("span");
+    strong.textContent = title;
+    text.textContent = message;
+    wrapper.className = "grid gap-0.5";
+    text.className = "text-xs";
+    wrapper.append(strong, text);
+    item.appendChild(wrapper);
+    host.appendChild(item);
+    setTimeout(() => item.remove(), 5000);
   }
 
-  function applyColorMode(choice) {
-    const actual = choice === "auto"
+  function resolveTheme(choice) {
+    return choice === "auto"
       ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : choice;
-    document.documentElement.dataset.theme = actual;
+  }
+
+  function applyTheme(choice) {
+    const theme = resolveTheme(choice);
+    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.dataset.themePreference = choice;
+    syncPlotlyTheme();
+  }
+
+  function syncPlotlyTheme() {
+    if (!window.Plotly) return;
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    const text = dark ? "#d7fbea" : "#17302a";
+    const grid = dark ? "rgba(117,255,207,.10)" : "rgba(10,75,60,.10)";
+    document.querySelectorAll(".plotly-graph-div").forEach(plot => {
+      try {
+        Plotly.relayout(plot, {
+          "paper_bgcolor": "rgba(0,0,0,0)",
+          "plot_bgcolor": "rgba(0,0,0,0)",
+          "font.color": text,
+          "xaxis.gridcolor": grid,
+          "yaxis.gridcolor": grid,
+          "xaxis.zerolinecolor": grid,
+          "yaxis.zerolinecolor": grid
+        });
+      } catch (_) {}
+    });
   }
 
   window.enableBrowserNotifications = async () => {
@@ -128,55 +233,46 @@
     });
   }
 
-  document.addEventListener("submit", e => {
-    e.target._submitter = e.submitter;
+  function initialize(root = document) {
+    initDropzones(root);
+    initSelects(root);
+    notifyNewPortalItems(root);
+    setTimeout(syncPlotlyTheme, 50);
+  }
+
+  document.addEventListener("submit", event => {
+    event.target._submitter = event.submitter;
   }, true);
 
-  document.addEventListener("htmx:configRequest", e => {
+  document.addEventListener("htmx:configRequest", event => {
     const token = getCookie("csrftoken");
-    if (token) e.detail.headers["X-CSRFToken"] = decodeURIComponent(token);
+    if (token) event.detail.headers["X-CSRFToken"] = decodeURIComponent(token);
   });
 
-  document.addEventListener("htmx:beforeRequest", e => startSpinner(loadingButton(e.detail.elt)));
-  document.addEventListener("htmx:afterRequest", e => stopSpinner(loadingButton(e.detail.elt)));
-
-  document.addEventListener("htmx:responseError", e => {
-    stopSpinner(loadingButton(e.detail.elt));
-    const status = e.detail.xhr?.status;
-    showClientToast(
-      "Request could not be completed",
-      `SmartEndorse encountered an error${status ? ` (HTTP ${status})` : ""}. The action was not completed.`,
+  document.addEventListener("htmx:beforeRequest", event => startSpinner(loadingButton(event.detail.elt)));
+  document.addEventListener("htmx:afterRequest", event => stopSpinner(loadingButton(event.detail.elt)));
+  document.addEventListener("htmx:responseError", event => {
+    stopSpinner(loadingButton(event.detail.elt));
+    const status = event.detail.xhr?.status;
+    showToast(
+      "Request failed",
+      `The action was not completed${status ? ` (HTTP ${status})` : ""}. Check the page message and try again.`,
       "error"
     );
   });
+  document.addEventListener("htmx:afterSwap", event => initialize(event.detail.target || document));
 
-  document.addEventListener("htmx:afterSwap", e => {
-    initSelects(e.detail.target || document);
-    notifyNewPortalItems(e.detail.target || document);
-  });
+  document.addEventListener("DOMContentLoaded", () => initialize(document));
 
-  document.addEventListener("DOMContentLoaded", () => {
-    initSelects();
-    notifyNewPortalItems(document);
-
-    const navToggle = document.getElementById("portal-nav-toggle");
-    navToggle?.addEventListener("click", () => document.body.classList.toggle("portal-nav-open"));
-
-    document.querySelectorAll(".portal-sidebar a").forEach(link => {
-      link.addEventListener("click", () => document.body.classList.remove("portal-nav-open"));
-    });
-  });
-
-  document.body?.addEventListener("htmx:afterRequest", e => {
-    if (e.detail.elt?.id === "appearance-form" && e.detail.successful) {
-      const mode = document.getElementById("color-mode-select")?.value || "auto";
-      applyColorMode(mode);
-      showClientToast("Appearance updated", "Your Django admin-style color mode has been saved.");
+  document.body?.addEventListener("htmx:afterRequest", event => {
+    if (event.detail.elt?.id === "appearance-form" && event.detail.successful) {
+      const choice = document.getElementById("color-mode-select")?.value || "auto";
+      applyTheme(choice);
+      showToast("Theme updated", `Using ${resolveTheme(choice)} mode.`);
     }
   });
 
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
-    const select = document.getElementById("color-mode-select");
-    if (select?.value === "auto") applyColorMode("auto");
+    if ((document.documentElement.dataset.themePreference || "auto") === "auto") applyTheme("auto");
   });
 })();

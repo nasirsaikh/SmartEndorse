@@ -1,28 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Log in | SmartEndorse{% endblock %}
+{% block title %}Sign in | SmartEndorse{% endblock %}
 {% block unauthenticated %}
-<div class="portal-login-shell">
-  <div class="portal-login">
-    <div class="portal-login-header">
-      <h1>SmartEndorse</h1>
-      <p>Group Insurance Endorsement Management</p>
-    </div>
-    <div class="login-form">
-      {% if form.errors %}<p class="errornote">Please enter a correct username and password.</p>{% endif %}
-      <form method="post">
-        {% csrf_token %}
-        <div class="form-row">
-          <label for="id_username">Username</label>
-          <input type="text" name="username" autofocus autocomplete="username" id="id_username">
+<div class="min-h-screen bg-base-200 p-4 sm:p-8">
+  <div class="mx-auto grid min-h-[calc(100vh-2rem)] max-w-6xl overflow-hidden border border-base-content/10 bg-base-100 shadow-2xl lg:grid-cols-[1.15fr_.85fr]">
+    <section class="relative hidden overflow-hidden border-r border-base-content/10 bg-base-200 p-10 lg:flex lg:flex-col lg:justify-between">
+      <div class="absolute inset-0 opacity-40" style="background-image:linear-gradient(var(--se-grid) 1px,transparent 1px),linear-gradient(90deg,var(--se-grid) 1px,transparent 1px);background-size:36px 36px"></div>
+      <div class="relative z-10">
+        <div class="flex items-center gap-3">
+          <div class="grid h-11 w-11 place-items-center rounded border border-primary/40 bg-primary/10 text-primary"><i class="bi bi-bezier2 text-2xl"></i></div>
+          <div><div class="font-mono text-sm font-bold tracking-[.16em]">SMARTENDORSE</div><div class="text-[9px] uppercase tracking-[.2em] opacity-45">Mission Control</div></div>
         </div>
-        <div class="form-row">
-          <label for="id_password">Password</label>
-          <input type="password" name="password" autocomplete="current-password" id="id_password">
+        <div class="mt-20 max-w-xl">
+          <div class="se-eyebrow text-primary opacity-100">Group insurance operations</div>
+          <h1 class="mt-4 font-mono text-4xl leading-tight tracking-[.04em]">CONTROL THE ENDORSEMENT PIPELINE.</h1>
+          <p class="mt-5 max-w-lg text-sm leading-6 opacity-60">AI-assisted intake, deterministic validation and pricing, controlled exceptions, TPA fulfilment, SLA telemetry and full audit history.</p>
         </div>
-        <div class="submit-row"><input type="submit" value="Log in"></div>
-      </form>
-      <p class="portal-login-note">Access is controlled by your SmartEndorse organization and role assignment.</p>
-    </div>
+      </div>
+      <div class="relative z-10 grid grid-cols-2 gap-px bg-base-content/10">
+        <div class="bg-base-100/70 p-4"><div class="se-eyebrow">Medical</div><div class="mt-2 text-xs font-semibold">TPA routing & card fulfilment</div></div>
+        <div class="bg-base-100/70 p-4"><div class="se-eyebrow">Group Life</div><div class="mt-2 text-xs font-semibold">Insurer core dispatch</div></div>
+        <div class="bg-base-100/70 p-4"><div class="se-eyebrow">Controls</div><div class="mt-2 text-xs font-semibold">Rule-governed pricing</div></div>
+        <div class="bg-base-100/70 p-4"><div class="se-eyebrow">Audit</div><div class="mt-2 text-xs font-semibold">Every transition retained</div></div>
+      </div>
+    </section>
+
+    <section class="flex items-center justify-center p-6 sm:p-10">
+      <div class="w-full max-w-sm">
+        <div class="mb-8 lg:hidden">
+          <div class="font-mono text-lg font-bold tracking-[.14em]">SMARTENDORSE</div>
+          <div class="text-[9px] uppercase tracking-[.2em] opacity-45">Mission Control</div>
+        </div>
+        <div class="se-eyebrow text-primary opacity-100">Secure portal</div>
+        <h2 class="mt-2 font-mono text-2xl font-semibold tracking-wide">SIGN IN</h2>
+        <p class="mt-2 text-xs opacity-50">Use your organization account to access the endorsement control plane.</p>
+
+        {% if form.errors %}<div class="alert alert-error mt-5 text-sm"><i class="bi bi-x-octagon"></i><span>Invalid username or password.</span></div>{% endif %}
+
+        <form method="post" class="mt-6 space-y-4">
+          {% csrf_token %}
+          <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">Username</span><input type="text" name="username" autofocus autocomplete="username" class="input input-bordered w-full"></label>
+          <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">Password</span><input type="password" name="password" autocomplete="current-password" class="input input-bordered w-full"></label>
+          <button class="btn btn-primary mt-2 w-full" type="submit">ENTER CONTROL CENTER <i class="bi bi-arrow-right"></i></button>
+        </form>
+
+        <div class="mt-6 flex items-center gap-2 text-[10px] uppercase tracking-wider opacity-40"><span class="status status-success"></span>Role and organization controls enforced</div>
+      </div>
+    </section>
   </div>
 </div>
 {% endblock %}

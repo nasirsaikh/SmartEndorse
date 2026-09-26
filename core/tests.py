@@ -43,17 +43,34 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    def test_authenticated_portal_uses_django_admin_visual_assets(self):
+    def test_authenticated_portal_uses_daisyui_command_center_assets(self):
         http = Client()
         http.force_login(self.requester)
         response = http.get("/")
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        self.assertIn("/static/admin/css/base.css", html)
-        self.assertIn("/static/admin/css/forms.css", html)
+        self.assertIn("daisyui@5", html)
+        self.assertIn("@tailwindcss/browser@4", html)
+        self.assertIn("ENDORSEMENT CONTROL", html)
+        self.assertNotIn("/static/admin/css/", html)
         self.assertNotIn("admin-lte", html.lower())
         self.assertNotIn("bootswatch", html.lower())
-        self.assertIn("SmartEndorse", html)
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_create_page_keeps_multi_file_drag_drop_controls(self):
+        PolicyAccess.objects.get_or_create(policy=self.policy, organization=self.client, defaults={"can_create": True})
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get("/endorsements/new/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("se-dropzone", html)
+        self.assertIn('data-drop-input="true"', html)
+        self.assertIn("BROWSE FILES", html)
+        self.assertIn('multiple', html)
 
 
 class PricingEngineTests(BaseInsuranceTest):

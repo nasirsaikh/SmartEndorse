@@ -1,21 +1,23 @@
-<div class="notification-head">
-  <div><strong>Notifications</strong><small>{{ unread_notifications }} unread</small></div>
-  {% if unread_notifications %}
-  <button class="button" hx-post="{% url 'notifications_read' %}" hx-swap="none" hx-on::after-request="htmx.trigger('#notification-panel','refresh')">Mark all read</button>
-  {% endif %}
+<div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3">
+  <div>
+    <div class="font-mono text-xs font-bold tracking-wide">NOTIFICATIONS</div>
+    <div class="mt-0.5 text-[10px] opacity-45">{{ unread_notifications }} unread</div>
+  </div>
+  {% if unread_notifications %}<button class="btn btn-ghost btn-xs" hx-post="{% url 'notifications_read' %}" hx-swap="none" hx-on::after-request="htmx.trigger('#notification-panel','refresh')">MARK ALL READ</button>{% endif %}
 </div>
-<div>
+<div class="max-h-[70vh] overflow-y-auto">
 {% for note in notifications %}
-  <a href="{{ note.link|default:'#' }}"
-     class="notification-item {% if not note.is_read %}notification-unread{% endif %}"
-     data-notification-id="{{ note.pk }}"
-     data-notification-title="{{ note.title|escape }}"
-     data-notification-message="{{ note.message|escape }}">
-    <div class="notification-title">{{ note.title }}</div>
-    <div class="notification-message">{{ note.message }}</div>
-    <div class="notification-time">{{ note.created_at|timesince }} ago</div>
+  <a href="{{ note.link|default:'#' }}" class="block border-b border-base-content/10 px-4 py-3 transition hover:bg-base-200 {% if not note.is_read %}border-l-2 border-l-primary bg-primary/5{% endif %}" data-notification-id="{{ note.pk }}" data-notification-title="{{ note.title|escape }}" data-notification-message="{{ note.message|escape }}">
+    <div class="flex gap-3">
+      <span class="mt-1 status {% if note.level == 'SUCCESS' %}status-success{% elif note.level == 'WARNING' %}status-warning{% elif note.level == 'DANGER' %}status-error{% else %}status-info{% endif %}"></span>
+      <div class="min-w-0">
+        <div class="truncate text-xs font-semibold">{{ note.title }}</div>
+        <div class="mt-1 text-[11px] leading-4 opacity-60">{{ note.message }}</div>
+        <div class="mt-1 font-mono text-[9px] uppercase tracking-wider opacity-35">{{ note.created_at|timesince }} ago</div>
+      </div>
+    </div>
   </a>
 {% empty %}
-  <div class="notification-empty">No notifications.</div>
+  <div class="p-8 text-center text-xs opacity-45"><i class="bi bi-bell-slash mb-2 block text-2xl"></i>No notifications</div>
 {% endfor %}
 </div>

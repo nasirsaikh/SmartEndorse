@@ -1,164 +1,224 @@
 {% load static %}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}SmartEndorse{% endblock %}</title>
+
   <script>
     (() => {
-      const saved = "{% if current_profile %}{{ current_profile.color_mode }}{% else %}auto{% endif %}";
-      const actual = saved === "auto"
-        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-        : saved;
-      document.documentElement.dataset.theme = actual;
+      const preference = "{% if current_profile %}{{ current_profile.color_mode }}{% else %}auto{% endif %}";
+      const resolved = preference === "auto"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : preference;
+      document.documentElement.setAttribute("data-theme", resolved);
+      document.documentElement.dataset.themePreference = preference;
     })();
   </script>
 
-  <link rel="stylesheet" href="{% static 'admin/css/base.css' %}">
-  <link rel="stylesheet" href="{% static 'admin/css/dark_mode.css' %}">
-  <link rel="stylesheet" href="{% static 'admin/css/forms.css' %}">
-  <link rel="stylesheet" href="{% static 'admin/css/changelists.css' %}">
-  <link rel="stylesheet" href="{% static 'admin/css/responsive.css' %}">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.default.min.css">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.default.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
 
   <script src="https://unpkg.com/htmx.org@2.0.7"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-3.1.1.min.js"></script>
 </head>
-<body class="{% if user.is_authenticated %}portal-body{% else %}login portal-login-body{% endif %}" hx-boost="true">
+<body class="min-h-screen bg-base-200 text-base-content" hx-boost="true">
 {% if user.is_authenticated %}
-<div id="container">
-  <header id="header">
-    <div id="branding">
-      <div id="site-name"><a href="{% url 'dashboard' %}">SmartEndorse</a></div>
-      <div class="portal-subtitle">Group Insurance Endorsement Management</div>
-    </div>
+<div class="drawer lg:drawer-open min-h-screen">
+  <input id="portal-drawer" type="checkbox" class="drawer-toggle">
 
-    <div id="user-tools">
-      <span class="portal-user">
-        {{ user.get_full_name|default:user.username }}
-        {% if current_profile %} · {{ current_profile.get_role_display }}{% endif %}
-      </span>
-
-      <details class="header-menu">
-        <summary onclick="window.enableBrowserNotifications?.()">
-          Notifications{% if unread_notifications %} <span class="header-count">{{ unread_notifications }}</span>{% endif %}
-        </summary>
-        <div class="header-menu-panel notification-panel-shell">
-          <div id="notification-panel"
-               hx-get="{% url 'notifications_panel' %}"
-               hx-trigger="load, every 20s"
-               hx-swap="innerHTML">
-            <div class="portal-loading">Loading notifications…</div>
+  <div class="drawer-content flex min-w-0 flex-col">
+    <header class="se-topbar sticky top-0 z-40 border-b border-base-content/10 bg-base-100/95 backdrop-blur">
+      <div class="navbar min-h-14 px-3 lg:px-5">
+        <div class="navbar-start gap-2">
+          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm lg:hidden" aria-label="Open navigation">
+            <i class="bi bi-list text-xl"></i>
+          </label>
+          <div class="hidden sm:flex items-center gap-3">
+            <span class="status status-success animate-pulse"></span>
+            <div class="text-[10px] uppercase tracking-[.2em] opacity-60">System status</div>
+            <div class="text-xs font-semibold text-success">All services nominal</div>
           </div>
         </div>
-      </details>
 
-      <details class="header-menu">
-        <summary>Appearance</summary>
-        <div class="header-menu-panel appearance-panel">
-          <form hx-post="{% url 'set_preferences' %}" hx-swap="none" id="appearance-form">
-            {% csrf_token %}
-            <label for="color-mode-select">Color mode</label>
-            <select name="color_mode" id="color-mode-select">
-              {% for value,label in color_modes %}
-                <option value="{{ value }}" {% if current_profile.color_mode == value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-            <button class="button" type="submit">
-              <span class="btn-label">Apply</span><span class="portal-spinner" aria-hidden="true"></span>
-            </button>
-          </form>
+        <div class="navbar-center hidden xl:flex">
+          <div class="se-command-chip">
+            <i class="bi bi-shield-check"></i>
+            <span>GROUP INSURANCE OPERATIONS</span>
+          </div>
         </div>
-      </details>
 
-      {% if user.is_staff %}<a href="/admin/">Administration</a><span class="user-tools-separator">/</span>{% endif %}
-      <form method="post" action="{% url 'logout' %}" class="header-logout">
-        {% csrf_token %}
-        <button type="submit" class="header-link">Log out</button>
-      </form>
-    </div>
-  </header>
+        <div class="navbar-end gap-1">
+          <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm hidden md:inline-flex">
+            <i class="bi bi-search"></i><span>Find request</span>
+          </a>
 
-  <div class="breadcrumbs">
-    <a href="{% url 'dashboard' %}">Home</a>
-    <span aria-hidden="true">›</span>
-    <span>{% block breadcrumb_label %}SmartEndorse{% endblock %}</span>
-  </div>
+          <div class="dropdown dropdown-end">
+            <button tabindex="0" class="btn btn-ghost btn-square btn-sm relative" type="button" onclick="window.enableBrowserNotifications?.()" aria-label="Notifications">
+              <i class="bi bi-bell text-lg"></i>
+              {% if unread_notifications %}
+              <span id="notification-badge" class="badge badge-error badge-xs absolute -right-1 -top-1">{{ unread_notifications }}</span>
+              {% endif %}
+            </button>
+            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-[min(26rem,calc(100vw-1.5rem))] overflow-hidden rounded-box border border-base-content/10 bg-base-100 shadow-2xl">
+              <div id="notification-panel"
+                   hx-get="{% url 'notifications_panel' %}"
+                   hx-trigger="load, every 20s"
+                   hx-swap="innerHTML">
+                <div class="p-6 text-center text-sm opacity-60"><span class="loading loading-spinner loading-sm"></span> Loading notifications</div>
+              </div>
+            </div>
+          </div>
 
-  <button id="portal-nav-toggle" class="portal-nav-toggle" type="button" aria-label="Toggle navigation">
-    <i class="bi bi-list"></i>
-  </button>
+          <div class="dropdown dropdown-end">
+            <button tabindex="0" class="btn btn-ghost btn-square btn-sm" type="button" aria-label="Appearance">
+              <i class="bi bi-circle-half text-lg"></i>
+            </button>
+            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-64 rounded-box border border-base-content/10 bg-base-100 p-4 shadow-2xl">
+              <div class="mb-3">
+                <div class="text-xs font-bold uppercase tracking-wider opacity-60">Appearance</div>
+                <div class="mt-1 text-sm">Light, dark, or follow your device.</div>
+              </div>
+              <form hx-post="{% url 'set_preferences' %}" hx-swap="none" id="appearance-form" class="space-y-3">
+                {% csrf_token %}
+                <select class="select select-bordered select-sm w-full" name="color_mode" id="color-mode-select">
+                  {% for value,label in color_modes %}
+                  <option value="{{ value }}" {% if current_profile.color_mode == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-primary btn-sm w-full" type="submit">
+                  <span class="btn-label">Apply theme</span>
+                  <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+                </button>
+              </form>
+            </div>
+          </div>
 
-  <div id="main" class="portal-main">
-    <nav id="nav-sidebar" class="portal-sidebar" aria-label="Primary navigation">
-      <div class="module">
-        <table>
-          <caption>Operations</caption>
-          <tbody>
-            <tr class="{% if request.resolver_match.url_name == 'dashboard' %}current-model{% endif %}">
-              <th scope="row"><a href="{% url 'dashboard' %}"><i class="bi bi-speedometer2"></i> Dashboard</a></th>
-            </tr>
-            <tr class="{% if request.resolver_match.url_name == 'endorsement_list' or request.resolver_match.url_name == 'endorsement_detail' or request.resolver_match.url_name == 'endorsement_item_edit' %}current-model{% endif %}">
-              <th scope="row"><a href="{% url 'endorsement_list' %}"><i class="bi bi-list-check"></i> Endorsements</a></th>
-            </tr>
-            {% if portal_can_create %}
-            <tr class="{% if request.resolver_match.url_name == 'endorsement_create' %}current-model{% endif %}">
-              <th scope="row"><a class="addlink" href="{% url 'endorsement_create' %}">New endorsement</a></th>
-            </tr>
-            {% endif %}
-          </tbody>
-        </table>
+          <div class="dropdown dropdown-end">
+            <button tabindex="0" class="btn btn-ghost h-auto min-h-0 gap-2 px-2 py-1.5" type="button">
+              <div class="avatar placeholder">
+                <div class="w-8 rounded bg-primary text-primary-content">
+                  <span class="text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>
+                </div>
+              </div>
+              <div class="hidden text-left lg:block">
+                <div class="max-w-36 truncate text-xs font-bold">{{ user.get_full_name|default:user.username }}</div>
+                <div class="max-w-36 truncate text-[10px] opacity-60">{{ current_profile.get_role_display }}</div>
+              </div>
+              <i class="bi bi-chevron-down hidden text-xs opacity-60 lg:block"></i>
+            </button>
+            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-64 rounded-box border border-base-content/10 bg-base-100 p-2 shadow-2xl">
+              <div class="px-3 py-2">
+                <div class="text-sm font-bold">{{ current_profile.organization.name }}</div>
+                <div class="text-xs opacity-60">{{ current_profile.get_role_display }}</div>
+              </div>
+              <div class="divider my-1"></div>
+              {% if user.is_staff %}
+              <a class="btn btn-ghost btn-sm w-full justify-start" href="/admin/"><i class="bi bi-sliders"></i>Django administration</a>
+              {% endif %}
+              <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="btn btn-ghost btn-sm w-full justify-start text-error" type="submit"><i class="bi bi-box-arrow-right"></i>Sign out</button>
+              </form>
+            </div>
+          </div>
+        </div>
       </div>
+    </header>
 
-      {% if user.is_staff %}
-      <div class="module">
-        <table>
-          <caption>Configuration</caption>
-          <tbody>
-            <tr><th scope="row"><a href="/admin/"><i class="bi bi-gear"></i> Django administration</a></th></tr>
-          </tbody>
-        </table>
-      </div>
-      {% endif %}
-
-      <div class="portal-account-block">
-        <strong>{{ current_profile.organization.name }}</strong>
-        <span>{{ current_profile.get_role_display }}</span>
-      </div>
-    </nav>
-
-    <main id="content-start" class="content portal-content" tabindex="-1">
-      <div id="content" class="colM">
-        <div class="portal-title-row">
-          <h1>{% block page_title %}SmartEndorse{% endblock %}</h1>
-          {% block object_tools %}{% endblock %}
+    <main class="min-w-0 flex-1">
+      <div class="mx-auto w-full max-w-[1800px] p-3 sm:p-4 lg:p-6">
+        <div class="mb-5 flex flex-col gap-3 border-b border-base-content/10 pb-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div class="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.22em] text-primary">
+              <span>{% block page_kicker %}SmartEndorse / Operations{% endblock %}</span>
+            </div>
+            <h1 class="font-mono text-2xl font-medium tracking-[.06em] sm:text-3xl">{% block page_title %}SmartEndorse{% endblock %}</h1>
+          </div>
+          <div class="flex flex-wrap gap-2">{% block object_tools %}{% endblock %}</div>
         </div>
 
         {% if messages %}
-        <ul class="messagelist">
+        <div class="mb-4 space-y-2">
           {% for message in messages %}
-          <li class="{% if 'error' in message.tags %}error{% elif 'warning' in message.tags %}warning{% elif 'success' in message.tags %}success{% endif %}">
-            {{ message }}
-          </li>
+          <div role="alert" class="alert {% if 'error' in message.tags %}alert-error{% elif 'warning' in message.tags %}alert-warning{% elif 'success' in message.tags %}alert-success{% else %}alert-info{% endif %} shadow-sm">
+            <i class="bi {% if 'error' in message.tags %}bi-x-octagon{% elif 'warning' in message.tags %}bi-exclamation-triangle{% elif 'success' in message.tags %}bi-check-circle{% else %}bi-info-circle{% endif %}"></i>
+            <span>{{ message }}</span>
+          </div>
           {% endfor %}
-        </ul>
+        </div>
         {% endif %}
 
         {% block content %}{% endblock %}
       </div>
     </main>
+
+    <footer class="border-t border-base-content/10 bg-base-100 px-5 py-3 text-[10px] uppercase tracking-widest opacity-50">
+      SmartEndorse · audited group insurance endorsement operations
+    </footer>
   </div>
 
-  <footer id="footer">
-    SmartEndorse · AI-assisted, rule-governed group insurance endorsements
-  </footer>
+  <div class="drawer-side z-50">
+    <label for="portal-drawer" aria-label="Close navigation" class="drawer-overlay"></label>
+    <aside class="se-sidebar min-h-full w-72 border-r border-base-content/10 bg-base-100">
+      <div class="flex h-16 items-center gap-3 border-b border-base-content/10 px-4">
+        <div class="grid h-9 w-9 place-items-center rounded border border-primary/40 bg-primary/10 text-primary">
+          <i class="bi bi-bezier2 text-xl"></i>
+        </div>
+        <div class="min-w-0">
+          <a href="{% url 'dashboard' %}" class="block font-mono text-sm font-bold tracking-[.14em]">SMARTENDORSE</a>
+          <div class="truncate text-[9px] uppercase tracking-[.2em] opacity-50">Mission Control</div>
+        </div>
+      </div>
+
+      <nav class="p-3">
+        <div class="mb-2 px-3 pt-2 text-[9px] font-bold uppercase tracking-[.22em] opacity-45">Command</div>
+        <ul class="menu gap-1 p-0 text-sm">
+          <li>
+            <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+              <i class="bi bi-grid-1x2"></i>Overview
+            </a>
+          </li>
+          <li>
+            <a href="{% url 'endorsement_list' %}" class="{% if request.resolver_match.url_name == 'endorsement_list' or request.resolver_match.url_name == 'endorsement_detail' or request.resolver_match.url_name == 'endorsement_item_edit' %}active{% endif %}">
+              <i class="bi bi-diagram-3"></i>Endorsement pipeline
+            </a>
+          </li>
+          {% if portal_can_create %}
+          <li>
+            <a href="{% url 'endorsement_create' %}" class="{% if request.resolver_match.url_name == 'endorsement_create' %}active{% endif %}">
+              <i class="bi bi-plus-square"></i>New endorsement
+            </a>
+          </li>
+          {% endif %}
+        </ul>
+
+        {% if user.is_staff %}
+        <div class="mb-2 mt-6 px-3 text-[9px] font-bold uppercase tracking-[.22em] opacity-45">Control plane</div>
+        <ul class="menu gap-1 p-0 text-sm">
+          <li><a href="/admin/"><i class="bi bi-gear"></i>Administration</a></li>
+        </ul>
+        {% endif %}
+
+        <div class="mt-6 rounded-box border border-base-content/10 bg-base-200/50 p-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[9px] font-bold uppercase tracking-[.18em] opacity-50">Session</span>
+            <span class="badge badge-success badge-xs">LIVE</span>
+          </div>
+          <div class="mt-2 truncate text-xs font-bold">{{ current_profile.organization.name }}</div>
+          <div class="truncate text-[10px] opacity-55">{{ current_profile.get_role_display }}</div>
+        </div>
+      </nav>
+    </aside>
+  </div>
 </div>
 
-<div id="portal-toast-container" class="portal-toast-container" aria-live="polite"></div>
+<div class="toast toast-top toast-end z-[100]" id="toast-container"></div>
 {% else %}
   {% block unauthenticated %}{% endblock %}
 {% endif %}

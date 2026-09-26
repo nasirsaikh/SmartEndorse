@@ -1,44 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Correct item | {{ endorsement.reference }}{% endblock %}
-{% block page_title %}Correct endorsement item{% endblock %}
-{% block object_tools %}
-<ul class="portal-object-tools"><li><a href="{% url 'endorsement_detail' endorsement.pk %}">View endorsement</a></li></ul>
-{% endblock %}
+{% block title %}Correct Item | {{ endorsement.reference }}{% endblock %}
+{% block page_kicker %}SmartEndorse / {{ endorsement.reference }} / Correction{% endblock %}
+{% block page_title %}CORRECT MEMBER ITEM{% endblock %}
+{% block object_tools %}<a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO REQUEST</a>{% endblock %}
 {% block content %}
 {% if item.validation_errors %}
-<div class="error-summary">
-  <strong>Current validation errors</strong>
-  <ul>{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul>
-</div>
+<div class="alert alert-warning mb-4"><i class="bi bi-exclamation-triangle"></i><div><strong>Current validation errors</strong><ul class="mt-1 list-disc pl-5 text-xs">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul></div></div>
 {% endif %}
 
-<form method="post" class="portal-form">
+<form method="post" class="space-y-4">
   {% csrf_token %}
-  <fieldset class="module">
-    <h2>{{ endorsement.reference }} · item #{{ item.pk }}</h2>
-    <p class="module-description">Correct only information supported by the source or client record. All changes are retained in the audit trail.</p>
-    <div class="portal-form-grid">
-      <div class="form-row span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
-      <div class="form-row span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
-      <div class="form-row span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
-      <div class="form-row span-4"><label>Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
-      <div class="form-row span-4"><label>Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
-      <div class="form-row span-4"><label>Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
-      <div class="form-row span-4"><label>Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
-      <div class="form-row span-4"><label>Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
-      <div class="form-row span-4"><label>Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
-      <div class="form-row span-6"><label>Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
-      <div class="form-row span-6"><label>Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">{{ endorsement.reference }}</div><div class="se-panel-title mt-1">ITEM #{{ item.pk }} / VERIFIED CORRECTION</div></div>
+      <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
     </div>
-  </fieldset>
-  <div class="submit-row">
-    <a class="button button-secondary" href="{% url 'endorsement_detail' endorsement.pk %}">Cancel</a>
-    <button class="button default" type="submit"><span class="btn-label">Save and revalidate</span><span class="portal-spinner" aria-hidden="true"></span></button>
+    <div class="se-form-grid p-4">
+      <div class="se-field se-span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
+      <div class="se-field se-span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
+      <div class="se-field se-span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
+      <div class="se-field se-span-4"><label>Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
+      <div class="se-field se-span-4"><label>Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
+      <div class="se-field se-span-4"><label>Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
+      <div class="se-field se-span-4"><label>Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
+      <div class="se-field se-span-4"><label>Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
+      <div class="se-field se-span-4"><label>Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
+      <div class="se-field se-span-6"><label>Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
+      <div class="se-field se-span-6"><label>Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
+    </div>
+  </section>
+  <div class="flex justify-end gap-2">
+    <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost">CANCEL</a>
+    <button class="btn btn-primary" type="submit"><span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE & REVALIDATE</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
   </div>
 </form>
 
-<section class="module">
-  <h2>Original extraction data</h2>
-  <div class="module-content"><pre class="json-preview">{{ item.extracted_data }}</pre></div>
+<section class="se-panel mt-4">
+  <div class="se-panel-head"><div><div class="se-eyebrow">Audit source</div><div class="se-panel-title mt-1">ORIGINAL EXTRACTION JSON</div></div></div>
+  <div class="p-4"><pre class="se-json">{{ item.extracted_data }}</pre></div>
 </section>
 {% endblock %}

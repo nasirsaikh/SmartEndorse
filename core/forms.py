@@ -32,13 +32,18 @@ class StyledFormMixin:
     def apply_bootstrap(self):
         for field in self.fields.values():
             existing = field.widget.attrs.get("class", "")
-            classes = [x for x in existing.split() if x not in {"form-control", "form-select", "form-check-input"}]
+            classes = [x for x in existing.split() if x not in {
+                "form-control", "form-select", "form-check-input", "vTextField",
+                "input", "select", "textarea", "input-bordered", "select-bordered", "textarea-bordered",
+            }]
             if isinstance(field.widget, forms.Select):
-                classes.append("searchable-select")
+                classes.extend(["select", "select-bordered", "w-full", "searchable-select"])
             elif isinstance(field.widget, forms.CheckboxInput):
-                classes.append("portal-checkbox")
+                classes.extend(["checkbox", "checkbox-sm"])
+            elif isinstance(field.widget, forms.Textarea):
+                classes.extend(["textarea", "textarea-bordered", "w-full"])
             elif not isinstance(field.widget, forms.FileInput):
-                classes.append("vTextField")
+                classes.extend(["input", "input-bordered", "w-full"])
             field.widget.attrs["class"] = " ".join(dict.fromkeys(classes))
 
 
@@ -56,8 +61,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
     attachments = MultiFileField(required=False, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
         "class": "portal-file-input",
-        "x-ref": "fileInput",
-        "@change": "addFiles($event.target.files)",
+        "data-drop-input": "true",
         "multiple": True,
     }))
 
@@ -104,7 +108,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
 class BulkRecoveryForm(forms.Form):
     attachments = MultiFileField(required=True, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
-        "class": "portal-file-input", "multiple": True,
+        "class": "portal-file-input", "data-drop-input": "true", "multiple": True,
     }))
 
 
@@ -112,7 +116,7 @@ class BulkRecoveryForm(forms.Form):
 class SupplementalUploadForm(forms.Form):
     attachments = MultiFileField(required=True, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
-        "class": "d-none", "multiple": True,
+        "class": "portal-file-input", "data-drop-input": "true", "multiple": True,
     }))
 
 
