@@ -600,6 +600,66 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(row["effective_date"], "15/09/2026")
         self.assertEqual(row["_source_raw"]["extraction_mode"], "deterministic_fallback")
 
+    @patch("core.ai.httpx.Client")
+    def test_semantic_mapper_auto_discovers_installed_qwen_when_no_text_provider_configured(self, client_cls):
+        vision = AIProviderConfig.objects.create(
+            name="GLM OCR Only",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+            timeout_seconds=300,
+        )
+        tags = MagicMock()
+        tags.raise_for_status.return_value = None
+        tags.json.return_value = {
+            "models": [
+                {"name": "glm-ocr:q8_0"},
+                {"name": "qwen3:8b"},
+                {"name": "qwen2.5:7b"},
+                {"name": "nomic-embed-text:latest"},
+            ]
+        }
+        client = client_cls.return_value.__enter__.return_value
+        client.get.return_value = tags
+
+        mapper = AIService(config=vision)._semantic_form_mapper()
+
+        self.assertIsNotNone(mapper)
+        self.assertEqual(mapper.config.model_name, "qwen2.5:7b")
+        self.assertFalse(mapper.config.supports_vision)
+        self.assertEqual(mapper.config.base_url, "http://127.0.0.1:11434")
+
+    @patch("core.ai.httpx.Client")
+    def test_semantic_model_admin_option_overrides_auto_discovery_preference(self, client_cls):
+        vision = AIProviderConfig.objects.create(
+            name="GLM OCR With Mapper Override",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+            timeout_seconds=300,
+            options={"semantic_model": "qwen3:8b"},
+        )
+        tags = MagicMock()
+        tags.raise_for_status.return_value = None
+        tags.json.return_value = {
+            "models": [
+                {"name": "glm-ocr:q8_0"},
+                {"name": "qwen2.5:7b"},
+                {"name": "qwen3:8b"},
+            ]
+        }
+        client = client_cls.return_value.__enter__.return_value
+        client.get.return_value = tags
+
+        mapper = AIService(config=vision)._semantic_form_mapper()
+
+        self.assertIsNotNone(mapper)
+        self.assertEqual(mapper.config.model_name, "qwen3:8b")
+
     @patch.object(AIService, "_chat")
     def test_semantic_form_mapper_handles_unfamiliar_document_nomenclature(self, chat_mock):
         text_provider = AIProviderConfig.objects.create(

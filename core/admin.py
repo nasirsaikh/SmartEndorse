@@ -62,7 +62,10 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
         ("Runtime", {
             "fields": ("temperature", "timeout_seconds", "options"),
             "description": (
-                "For Ollama, options may override runtime parameters. Generic vision OCR defaults to num_ctx=4096; "
+                "For Ollama, options may override runtime parameters. If no separate active text provider is configured, "
+                "SmartEndorse can auto-discover a local semantic mapper from Ollama /api/tags. "
+                'Use {"semantic_model": "qwen2.5:7b"} to force a specific installed mapper. '
+                "Generic vision OCR defaults to num_ctx=4096; "
                 "GLM-OCR defaults to num_ctx=8192 because its image tokens can exceed 4096. "
                 'Example: {"num_gpu": -1, "num_predict": 1024, "keep_alive": "15m"}. '
                 "num_gpu=-1 means offload as many layers as fit. GLM-OCR automatically runs as OCR-only and then uses "
