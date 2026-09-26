@@ -25,7 +25,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "organization", "role", "portal_theme", "color_mode", "can_override_workflow")
+    list_display = ("user", "organization", "role", "job_title", "portal_theme", "color_mode", "can_override_workflow")
     list_filter = ("role", "organization__organization_type", "portal_theme", "color_mode")
     search_fields = ("user__username", "user__email", "organization__name")
 
