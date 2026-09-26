@@ -1,0 +1,96 @@
+<div class="space-y-4">
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 1</div><div class="se-panel-title mt-1">INTAKE & CORRECTION</div></div>
+      <span class="se-status {% if current_step == 'intake' %}se-status-info{% else %}se-status-ok{% endif %}">{% if current_step == 'intake' %}Current step{% else %}Read-only history{% endif %}</span>
+    </div>
+    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+      <div class="text-xs leading-5 opacity-70">
+        Review extracted and manually entered members here. Correct, add or remove rows before sending the endorsement into validation.
+        {% if latest_rejection_reason %}<div class="mt-3 rounded border border-error/20 bg-error/5 px-3 py-2 text-error"><strong>Returned / rejection reason:</strong> {{ latest_rejection_reason }}</div>{% endif %}
+      </div>
+      {% if editable_intake %}
+      <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-primary" type="submit"><i class="bi bi-shield-check"></i>VALIDATE & SUBMIT</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+
+  {% include "endorsements/partials/_validation_issues.html" %}
+  {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=True show_tpa_controls=False %}
+
+  {% if editable_intake %}
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Intake tools</div><div class="se-panel-title mt-1">FILES & MANUAL MEMBER ENTRY</div></div>
+      <span class="badge badge-outline badge-warning badge-xs">THIS ENDORSEMENT ONLY</span>
+    </div>
+    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,.7fr)]">
+      <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_supplemental_upload' endorsement.pk %}">
+        {% csrf_token %}
+        <div class="se-dropzone min-h-[12rem]">
+          <input class="portal-file-input" data-drop-input="true" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
+          <div class="w-full text-center">
+            <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+            <strong class="font-mono text-xs tracking-wider">DROP CORRECTION FILES</strong>
+            <div class="mt-2 text-[10px] opacity-55">PDF/images selected together are treated as one evidence bundle, including separate front/back ID files.</div>
+            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">BROWSE FILES</button>
+            <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No files selected</div>
+          </div>
+          <div class="se-file-list w-full"></div>
+        </div>
+        <div class="mt-3 text-right"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-cloud-check"></i>APPLY FILES</button></div>
+      </form>
+
+      <form method="post" action="{% url 'endorsement_item_add' endorsement.pk %}" class="rounded-box border border-base-content/10 bg-base-200/50 p-4">
+        {% csrf_token %}
+        <div class="se-eyebrow">Manual intake</div>
+        <div class="mt-2 text-xs font-semibold">Add another member manually</div>
+        <div class="mt-3 grid gap-2">
+          <label class="se-field"><span>Full name</span>{{ add_item_form.full_name }}</label>
+          <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Member no.</span>{{ add_item_form.member_no }}</label><label class="se-field"><span>Employee no.</span>{{ add_item_form.employee_no }}</label></div>
+          <label class="se-field"><span>Civil / National ID</span>{{ add_item_form.national_id }}</label>
+          <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Relationship</span>{{ add_item_form.relationship }}</label><label class="se-field"><span>Gender</span>{{ add_item_form.gender }}</label></div>
+          <label class="se-field"><span>Date of birth</span>{{ add_item_form.date_of_birth }}</label>
+          <label class="se-field"><span>Plan</span>{{ add_item_form.plan }}</label>
+          <label class="se-field"><span>Effective date</span>{{ add_item_form.effective_date }}</label>
+        </div>
+        <button class="btn btn-primary btn-sm mt-3 w-full" type="submit"><i class="bi bi-person-plus"></i>ADD MEMBER</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if resolution_rows %}
+  <section class="se-panel">
+    <div class="se-panel-head"><div><div class="se-eyebrow">Correction ledger</div><div class="se-panel-title mt-1">RESOLVED / CHANGED RECORDS</div></div></div>
+    <div class="overflow-x-auto">
+      <table class="se-table">
+        <thead><tr><th>When</th><th>Action</th><th>Before / source</th><th>After / filled</th></tr></thead>
+        <tbody>{% for row in resolution_rows %}<tr><td class="mono">{{ row.created_at|date:"d M H:i" }}</td><td>{{ row.description }}</td><td>{{ row.before_or_source }}</td><td>{{ row.after_or_filled }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="se-panel">
+    <div class="se-panel-head"><div><div class="se-eyebrow">Source registry</div><div class="se-panel-title mt-1">ATTACHMENTS</div></div></div>
+    <div class="overflow-x-auto">
+      <table class="se-table">
+        <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Source</th></tr></thead>
+        <tbody>
+        {% for attachment in endorsement.attachments.all %}
+        <tr>
+          <td><strong>{{ attachment.original_name }}</strong></td>
+          <td>{{ attachment.get_kind_display }}{% if attachment.is_supplemental %} · Supplemental{% endif %}</td>
+          <td>{% if attachment.processed %}<span class="se-status se-status-ok">Processed</span>{% else %}<span class="se-status se-status-warn">Exception</span>{% endif %}</td>
+          <td><details><summary class="btn btn-ghost btn-xs">JSON</summary><pre class="se-json mt-2">{{ attachment.extracted_payload }}</pre></details></td>
+        </tr>
+        {% empty %}<tr><td colspan="4" class="py-8 text-center opacity-45">No attachments.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
