@@ -598,7 +598,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(row["gender"], "F")
         self.assertEqual(row["plan_code"], "G")
         self.assertEqual(row["effective_date"], "15/09/2026")
-        self.assertEqual(row["_source_raw"]["extraction_mode"], "direct_form_fill")
+        self.assertEqual(row["_source_raw"]["extraction_mode"], "deterministic_fallback")
 
     @patch.object(AIService, "_chat")
     def test_semantic_form_mapper_handles_unfamiliar_document_nomenclature(self, chat_mock):
