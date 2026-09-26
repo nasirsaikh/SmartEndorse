@@ -1,61 +1,66 @@
 {% extends "base.html" %}
 {% block title %}Dashboard | SmartEndorse{% endblock %}
-{% block page_title %}{% if org_type == "TPA" %}TPA Operations Dashboard{% elif org_type == "INSURER" %}Insurance Operations Dashboard{% else %}Client Endorsement Dashboard{% endif %}{% endblock %}
+{% block page_title %}{% if org_type == "TPA" %}TPA operations{% elif org_type == "INSURER" %}Insurance operations{% else %}Client endorsement dashboard{% endif %}{% endblock %}
+{% block object_tools %}
+<ul class="portal-object-tools">
+  {% if can_create %}<li><a class="addlink" href="{% url 'endorsement_create' %}">Add endorsement</a></li>{% endif %}
+</ul>
+{% endblock %}
 {% block content %}
-<div class="hero-panel mb-4">
-  <div>
-    <div class="eyebrow text-primary"><i class="bi bi-stars me-1"></i> SMART ENDORSEMENT CONTROL TOWER</div>
-    <h2 class="h3 mb-2">One auditable pipeline from upload to endorsement completion.</h2>
-    <p class="mb-0 text-body-secondary">AI-assisted extraction, deterministic policy validation and pricing, exception recovery, approvals, SLA tracking, TPA fulfilment and full audit history.</p>
-  </div>
-  {% if can_create %}<a href="{% url 'endorsement_create' %}" class="btn btn-primary btn-lg"><i class="bi bi-plus-circle me-1"></i> New endorsement</a>{% endif %}
+<div class="portal-kpis">
+  <div class="portal-kpi"><span class="label">Open requests</span><strong>{{ open_count }}</strong><small>Active workflow items</small></div>
+  <div class="portal-kpi"><span class="label">Completed</span><strong>{{ completed }}</strong><small>Closed requests</small></div>
+  <div class="portal-kpi"><span class="label">STP rate</span><strong>{{ stp_rate }}%</strong><small>Zero-touch eligible</small></div>
+  <div class="portal-kpi {% if breached %}alert{% endif %}"><span class="label">SLA breached</span><strong>{{ breached }}</strong><small>Needs attention</small></div>
+  <div class="portal-kpi"><span class="label">Premium impact</span><strong>{{ premium|floatformat:3 }}</strong><small>Portfolio currency</small></div>
 </div>
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-hourglass-split"></i> Open</span><strong>{{ open_count }}</strong><small>active requests</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-check2-circle"></i> Completed</span><strong>{{ completed }}</strong><small>closed requests</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-lightning-charge"></i> STP rate</span><strong>{{ stp_rate }}%</strong><small>zero-touch eligible</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card {% if breached %}metric-alert{% endif %}"><span><i class="bi bi-alarm"></i> SLA breached</span><strong>{{ breached }}</strong><small>needs attention</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-cash-stack"></i> Premium impact</span><strong>{{ premium|floatformat:3 }}</strong><small>portfolio currency</small></div></div>
-</div>
+<div class="portal-dashboard-grid">
+  <section class="module chart-module">
+    <h2>Requests by status</h2>
+    <div class="module-content">{{ chart_status|safe }}</div>
+  </section>
 
-<div class="row g-3 mb-4">
-  <div class="col-lg-8"><div class="panel h-100 chart-panel">{{ chart_status|safe }}</div></div>
-  <div class="col-lg-4">
-    <div class="panel h-100 p-4">
-      <div class="section-title"><i class="bi bi-speedometer2"></i> Operating snapshot</div>
-      <div class="snapshot-row"><span>Accessible policies</span><strong>{{ policy_count }}</strong></div>
-      <div class="snapshot-row"><span>TPA queue</span><strong>{{ tpa_queue }}</strong></div>
-      <div class="snapshot-row"><span>Exceptions</span><strong>{{ exceptions }}</strong></div>
-      <div class="snapshot-row"><span>Total requests</span><strong>{{ total }}</strong></div>
-      <div class="alert alert-primary-subtle border-0 small mt-3 mb-0"><i class="bi bi-shield-check me-1"></i> Cases with validation errors, existing-member conflicts or pending financial approvals cannot move to completion.</div>
+  <section class="module">
+    <h2>Operating snapshot</h2>
+    <div class="module-content">
+      <div class="snapshot-list">
+        <div class="snapshot-row"><span>Accessible policies</span><strong>{{ policy_count }}</strong></div>
+        <div class="snapshot-row"><span>TPA queue</span><strong>{{ tpa_queue }}</strong></div>
+        <div class="snapshot-row"><span>Exceptions</span><strong>{{ exceptions }}</strong></div>
+        <div class="snapshot-row"><span>Total requests</span><strong>{{ total }}</strong></div>
+      </div>
+      <p class="help">
+        Requests with validation errors, existing-member conflicts or pending approvals remain blocked until the exception is resolved.
+      </p>
     </div>
-  </div>
+  </section>
 </div>
 
-<div class="panel mb-4 chart-panel">{{ chart_trend|safe }}</div>
+<section class="module chart-module">
+  <h2>Endorsement trend</h2>
+  <div class="module-content">{{ chart_trend|safe }}</div>
+</section>
 
-<div class="panel">
-  <div class="panel-heading">
-    <div><h3 class="h6 mb-1">Recent endorsements</h3><p class="small text-body-secondary mb-0">Latest activity across policies you can access.</p></div>
-    <a href="{% url 'endorsement_list' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-list-ul me-1"></i>View all</a>
-  </div>
-  <div class="table-responsive">
-    <table class="table align-middle mb-0">
-      <thead><tr><th>Reference</th><th>Policy</th><th>Type</th><th>Status</th><th>SLA</th><th class="text-end">Premium impact</th></tr></thead>
+<section class="module">
+  <h2>Recent endorsements</h2>
+  <p class="module-description">Latest activity across policies you are permitted to access.</p>
+  <div class="portal-table-wrap">
+    <table class="portal-table">
+      <thead><tr><th>Reference</th><th>Policy</th><th>Type</th><th>Status</th><th>SLA</th><th class="numeric">Premium impact</th></tr></thead>
       <tbody>
       {% for item in recent %}
       <tr>
-        <td><a href="{% url 'endorsement_detail' item.pk %}" class="fw-semibold text-decoration-none">{{ item.reference }}</a><div class="small text-body-secondary">{{ item.created_at|date:"d M Y H:i" }}</div></td>
-        <td>{{ item.policy.policy_number }}<div class="small text-body-secondary">{{ item.policy.client.name }}</div></td>
+        <td><a href="{% url 'endorsement_detail' item.pk %}"><strong>{{ item.reference }}</strong></a><div class="muted">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+        <td>{{ item.policy.policy_number }}<div class="muted">{{ item.policy.client.name }}</div></td>
         <td>{{ item.get_endorsement_type_display }}</td>
-        <td><span class="status-pill status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-        <td>{% if item.sla_breached %}<span class="text-danger fw-semibold"><i class="bi bi-exclamation-octagon me-1"></i>Breached</span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M H:i" }}{% else %}—{% endif %}</td>
-        <td class="text-end">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
+        <td><span class="status-label status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
+        <td>{% if item.sla_breached %}<span class="text-danger"><strong>Breached</strong></span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M H:i" }}{% else %}—{% endif %}</td>
+        <td class="numeric">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
       </tr>
-      {% empty %}<tr><td colspan="6" class="text-center py-5 text-body-secondary">No endorsement requests yet.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="6" class="empty-state">No endorsement requests yet.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
-</div>
+</section>
 {% endblock %}
