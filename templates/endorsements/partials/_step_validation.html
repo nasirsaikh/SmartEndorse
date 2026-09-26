@@ -1,0 +1,23 @@
+<div class="space-y-4">
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 2</div><div class="se-panel-title mt-1">VALIDATION</div></div>
+      <span class="se-status {% if current_step == 'validation' %}se-status-info{% elif item_kpis.errors %}se-status-error{% else %}se-status-ok{% endif %}">
+        {% if current_step == "validation" %}Running{% elif item_kpis.errors %}Issues found{% else %}Validated{% endif %}
+      </span>
+    </div>
+    <div class="grid grid-cols-2 gap-px bg-base-content/10 sm:grid-cols-4">
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Validation score</div><div class="mt-1 font-mono text-2xl">{{ endorsement.validation_score }}%</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Valid rows</div><div class="mt-1 font-mono text-2xl text-success">{{ item_kpis.correct }}</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Errors</div><div class="mt-1 font-mono text-2xl text-error">{{ item_kpis.errors }}</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Approval required</div><div class="mt-1 font-mono text-2xl text-warning">{{ item_kpis.approval }}</div></div>
+    </div>
+    <div class="p-4 text-xs leading-5 opacity-70">
+      This step validates policy eligibility, member data, document extraction and pricing. Failed validation returns the case to Intake/Correction; successful validation routes it to approval or straight-through processing according to configured rules.
+      {% if current_step == "intake" and editable_intake %}<div class="mt-3"><a class="btn btn-primary btn-sm" href="?step=intake#workflow-stage"><i class="bi bi-arrow-left"></i>RETURN TO INTAKE TO CORRECT / SUBMIT</a></div>{% endif %}
+    </div>
+  </section>
+
+  {% include "endorsements/partials/_validation_issues.html" %}
+  {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=False show_tpa_controls=False %}
+</div>

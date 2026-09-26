@@ -126,3 +126,66 @@ body{
   .se-span-12,.se-span-8,.se-span-6,.se-span-4,.se-span-3{grid-column:1}
   .se-table{font-size:.72rem}
 }
+
+
+/* Endorsement processing wizard */
+.se-workflow-shell{
+  border:1px solid var(--se-line);
+  background:color-mix(in srgb,var(--color-base-100) 97%,transparent);
+  box-shadow:0 12px 30px color-mix(in srgb,#000 5%,transparent);
+}
+.se-workflow-scroll{overflow-x:auto}
+.se-workflow-wizard{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(12rem,1fr));
+  min-width:60rem;
+  background:var(--se-line);
+  gap:1px;
+}
+.se-workflow-step{
+  position:relative;
+  display:block;
+  min-width:0;
+  background:var(--color-base-100);
+  padding:.85rem;
+  color:inherit;
+  text-decoration:none;
+  transition:background .15s ease,box-shadow .15s ease,transform .15s ease;
+}
+.se-workflow-step:hover{background:color-mix(in srgb,var(--color-primary) 5%,var(--color-base-100))}
+.se-workflow-step.is-selected{
+  z-index:1;
+  box-shadow:inset 0 -3px 0 var(--color-primary),inset 0 0 0 1px color-mix(in srgb,var(--color-primary) 45%,transparent);
+}
+.se-workflow-step.is-current{background:color-mix(in srgb,var(--color-primary) 7%,var(--color-base-100))}
+.se-workflow-step.is-done .se-workflow-index{border-color:color-mix(in srgb,var(--color-success) 55%,transparent);background:color-mix(in srgb,var(--color-success) 12%,transparent);color:var(--color-success)}
+.se-workflow-step.is-current .se-workflow-index{border-color:color-mix(in srgb,var(--color-primary) 65%,transparent);background:color-mix(in srgb,var(--color-primary) 12%,transparent);color:var(--color-primary)}
+.se-workflow-step.is-returned .se-workflow-index{border-color:color-mix(in srgb,var(--color-warning) 60%,transparent);background:color-mix(in srgb,var(--color-warning) 12%,transparent);color:var(--color-warning)}
+.se-workflow-step.is-returned .se-workflow-state{color:var(--color-warning);opacity:.9}
+.se-workflow-step-top{display:flex;align-items:center;gap:.65rem}
+.se-workflow-index{
+  display:grid;height:1.7rem;width:1.7rem;flex:0 0 auto;place-items:center;
+  border:1px solid var(--se-line);border-radius:.3rem;
+  font:700 .65rem ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.se-workflow-name{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:.72rem/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+}
+.se-workflow-state{margin-top:.18rem;font-size:.52rem;font-weight:800;letter-spacing:.14em;opacity:.45}
+.se-workflow-tat{
+  display:grid;grid-template-columns:1fr 1fr;gap:.45rem;margin-top:.8rem;
+  border-top:1px solid var(--se-line);padding-top:.65rem;
+}
+.se-workflow-tat>div{min-width:0}
+.se-workflow-tat span{display:block;font-size:.48rem;font-weight:800;letter-spacing:.12em;opacity:.45;white-space:nowrap}
+.se-workflow-tat strong{display:block;margin-top:.18rem;font:.7rem ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
+.se-workflow-breach{margin-top:.55rem;font-size:.52rem;font-weight:800;letter-spacing:.08em;color:var(--color-error)}
+.se-workflow-footer{
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  border-top:1px solid var(--se-line);padding:.7rem 1rem;font-size:.68rem;
+}
+@media(max-width:640px){
+  .se-workflow-footer{align-items:flex-start;flex-direction:column}
+}

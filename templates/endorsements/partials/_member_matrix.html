@@ -1,0 +1,77 @@
+{% comment %}Shared member matrix. Pass allow_member_edit and show_tpa_controls when including.{% endcomment %}
+<section class="se-panel">
+  <div class="se-panel-head">
+    <div>
+      <div class="se-eyebrow">Normalized records</div>
+      <div class="se-panel-title mt-1">MEMBER MATRIX</div>
+    </div>
+    <span class="badge badge-ghost badge-sm">{{ item_kpis.total }} ROW{{ item_kpis.total|pluralize|upper }}</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="se-table">
+      <thead>
+        <tr>
+          <th>Status</th><th>Member</th><th>Relationship / plan</th><th>Effective</th>
+          <th>Card no.</th><th>TPA effective</th><th class="num">System impact</th>
+          <th class="num">TPA amount</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in endorsement.items.all %}
+        <tr>
+          <td>
+            <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
+            {% if item.is_existing_record %}<span class="ml-2 text-[10px] font-bold text-warning">EXISTING</span>{% endif %}
+          </td>
+          <td>
+            <strong class="text-xs">{{ item.full_name|default:"—" }}</strong>
+            <span class="ml-2 text-[10px] opacity-45">{{ item.member_no|default:item.employee_no|default:item.national_id|default:"No identifier" }}</span>
+          </td>
+          <td>
+            {{ item.relationship|default:"—" }}
+            {% if item.plan %}<span class="ml-2 text-[10px] opacity-45">{{ item.plan.code }} · {{ item.plan.name }}</span>{% endif %}
+          </td>
+          <td class="mono">{{ item.effective_date|default:endorsement.effective_date|date:"d M Y" }}</td>
+          <td class="mono">{{ item.card_number|default:"—" }}</td>
+          <td class="mono">{{ item.tpa_effective_date|date:"d M Y"|default:"—" }}</td>
+          <td class="num mono">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</td>
+          <td class="num mono">{% if item.tpa_premium_amount != None %}{{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}{% else %}—{% endif %}</td>
+          <td class="whitespace-nowrap">
+            {% if allow_member_edit and can_edit %}
+              <a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>
+              {% if can_delete_items %}
+              <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="inline" onsubmit="return confirm('Delete this member row from the intake/correction?');">
+                {% csrf_token %}
+                <button class="btn btn-error btn-ghost btn-xs" type="submit"><i class="bi bi-trash3"></i>DELETE</button>
+              </form>
+              {% endif %}
+            {% endif %}
+            <details class="dropdown dropdown-end inline-block">
+              <summary class="btn btn-ghost btn-xs"><i class="bi bi-braces"></i>SOURCE</summary>
+              <div class="dropdown-content z-30 mt-2 w-[min(36rem,90vw)] rounded-box border border-base-content/10 bg-base-100 p-3 shadow-2xl">
+                <pre class="se-json">{{ item.extracted_data }}</pre>
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% if show_tpa_controls and can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
+        <tr>
+          <td colspan="9" class="bg-info/5">
+            <form class="grid gap-3 md:grid-cols-[1.4fr_1.2fr_1.4fr_auto] md:items-end" method="post" action="{% url 'endorsement_tpa_item' endorsement.pk item.pk %}">
+              {% csrf_token %}
+              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA card number *</span><input class="input input-bordered w-full" name="card_number" value="{{ item.card_number }}" required></label>
+              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA effective date *</span><input class="input input-bordered w-full" type="date" name="effective_date" value="{% if item.tpa_effective_date %}{{ item.tpa_effective_date|date:'Y-m-d' }}{% elif item.effective_date %}{{ item.effective_date|date:'Y-m-d' }}{% else %}{{ endorsement.effective_date|date:'Y-m-d' }}{% endif %}" required></label>
+              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA premium / refund amount *</span><input class="input input-bordered w-full" type="number" step="0.001" name="amount" value="{% if item.tpa_premium_amount != None %}{{ item.tpa_premium_amount }}{% else %}{{ item.premium_impact }}{% endif %}" required></label>
+              <button class="btn btn-info" type="submit"><span class="btn-label">SAVE TPA DATA</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
+            </form>
+            <div class="mt-2 text-[10px] opacity-50">A TPA amount different from the system amount raises the configured approval and preserves the before/after audit.</div>
+          </td>
+        </tr>
+        {% endif %}
+      {% empty %}
+        <tr><td colspan="9" class="py-12 text-center opacity-50">No member records are available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

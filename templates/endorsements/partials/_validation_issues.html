@@ -1,0 +1,68 @@
+{% if member_issues or request_issues or has_blocking_document_issues %}
+<section class="se-panel border-warning/40">
+  <div class="se-panel-head bg-warning/10">
+    <div>
+      <div class="se-eyebrow text-warning opacity-100">Blocking validation</div>
+      <div class="se-panel-title mt-1">ACTION REQUIRED</div>
+    </div>
+    <span class="se-status se-status-warn">Review required</span>
+  </div>
+
+  {% if member_issues %}
+  <div class="border-b border-base-content/10 p-4">
+    <div class="mb-3 flex items-center gap-2">
+      <i class="bi bi-person-exclamation text-error"></i>
+      <strong class="text-sm">Member validation issues</strong>
+      <span class="badge badge-error badge-sm">{{ member_issues|length }}</span>
+    </div>
+    <div class="space-y-2">
+      {% for issue in member_issues %}
+      <div class="flex flex-col gap-2 rounded-box border border-error/20 bg-error/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div class="text-xs font-semibold">{{ issue.member_label }}</div>
+          <div class="mt-1 text-[11px] text-error">{{ issue.error }}</div>
+        </div>
+        {% if editable_intake %}<a href="{% url 'endorsement_item_edit' endorsement.pk issue.item.pk %}" class="btn btn-error btn-outline btn-xs"><i class="bi bi-pencil-square"></i>CORRECT MEMBER</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if request_issues %}
+  <div class="border-b border-base-content/10 p-4">
+    <div class="mb-2 flex items-center gap-2"><i class="bi bi-shield-exclamation text-warning"></i><strong class="text-sm">Policy / request issues</strong></div>
+    <ul class="list-disc space-y-1 pl-5 text-xs">{% for error in request_issues %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if has_blocking_document_issues %}
+  <div class="p-4">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2"><i class="bi bi-file-earmark-x text-warning"></i><strong class="text-sm">Document processing issues</strong></div>
+      {% if editable_intake %}
+      <form method="post" action="{% url 'endorsement_retry_failed_evidence' endorsement.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-warning btn-sm" type="submit"><i class="bi bi-layers"></i>RETRY FAILED DOCUMENTS</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="space-y-2">
+      {% for issue in document_issues %}
+      {% if issue.blocking %}
+      <div class="flex flex-col gap-2 rounded-box border border-warning/25 bg-warning/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div><div class="text-xs font-semibold">{{ issue.attachment.original_name }}</div><div class="mt-1 text-[11px] text-warning">{{ issue.error }}</div></div>
+        {% if editable_intake %}
+        <form method="post" action="{% url 'endorsement_remove_failed_attachment' endorsement.pk issue.attachment.pk %}" onsubmit="return confirm('Remove failed document {{ issue.attachment.original_name|escapejs }}?');">
+          {% csrf_token %}
+          <button class="btn btn-warning btn-outline btn-xs" type="submit"><i class="bi bi-trash3"></i>REMOVE FILE</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
