@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 from datetime import timedelta
+import logging
 
 import plotly.graph_objects as go
 from django.contrib import messages
@@ -23,6 +24,17 @@ from .models import (
     EndorsementRequest, Policy, PolicyPlan, PortalNotification, RecoveryUpload, UserProfile, WorkflowEvent,
 )
 from .services import BulkRecoveryService, FileIntakeService, PricingEngine, ValidationService, WorkflowService, json_safe
+
+
+logger = logging.getLogger(__name__)
+
+
+def _form_error_text(form):
+    parts = []
+    for field, errors in form.errors.items():
+        label = form.fields.get(field).label if field in form.fields else field
+        parts.extend(f"{label}: {error}" for error in errors)
+    return "; ".join(parts) or "Invalid request."
 
 
 def _chart_html(qs):
@@ -81,8 +93,6 @@ def request_list(request):
         "endorsements": qs[:200], "status_choices": EndorsementRequest.Status.choices,
         "product_choices": Policy.Product.choices, "selected_status": status, "selected_product": product,
         "q": q, "can_create": can_create_endorsement(request.user),
-        "bulk_recovery_form": BulkRecoveryForm(),
-        "recent_recovery_uploads": RecoveryUpload.objects.filter(organization=request.user.profile.organization).order_by("-created_at")[:5],
     }
     return render(request, "endorsements/_table.html" if getattr(request, "htmx", False) else "endorsements/list.html", context)
 
@@ -100,39 +110,64 @@ def policy_plans(request):
 
 
 @login_required
-def bulk_recovery(request):
+def bulk_recovery(request, pk):
+    endorsement = _get_accessible_request(request.user, pk)
     if request.method != "POST":
-        return HttpResponse(status=405)
+        messages.error(request, "Bulk correction only accepts uploaded files.")
+        return redirect("endorsement_detail", pk=pk)
+    if not can_edit_request(request.user, endorsement):
+        messages.error(request, "You do not have permission to correct this endorsement.")
+        return redirect("endorsement_detail", pk=pk)
+    if endorsement.status not in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY}:
+        messages.warning(request, "Bulk correction is only available while this endorsement is waiting for information.")
+        return redirect("endorsement_detail", pk=pk)
+
     form = BulkRecoveryForm(request.POST, request.FILES)
     if not form.is_valid():
-        messages.error(request, "Select one or more supported recovery files within the configured upload limit.")
-        return redirect("endorsement_list")
-    candidates = [
-        obj for obj in accessible_endorsements(request.user).filter(status__in=[EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY])
-        if can_edit_request(request.user, obj)
-    ]
-    if not candidates:
-        messages.warning(request, "There are no editable exception cases available for bulk recovery.")
-        return redirect("endorsement_list")
-    touched = set()
+        messages.error(request, f"Bulk correction could not be processed. {_form_error_text(form)}")
+        return redirect("endorsement_detail", pk=pk)
+
     uploads = []
-    for file_obj in form.cleaned_data["attachments"]:
-        upload = RecoveryUpload.objects.create(
-            uploaded_by=request.user, organization=request.user.profile.organization, file=file_obj,
-            original_name=file_obj.name, kind=FileIntakeService.kind_for_name(file_obj.name),
-        )
-        touched.update(BulkRecoveryService.process(upload, candidates))
-        uploads.append(upload)
-    for endorsement in accessible_endorsements(request.user).filter(pk__in=touched):
-        WorkflowService.revalidate_after_correction(endorsement, request.user)
-    resolved = sum(u.resolved_count for u in uploads)
-    ambiguous = sum(u.ambiguous_count for u in uploads)
-    unmatched = sum(u.unmatched_count for u in uploads)
-    if resolved:
-        messages.success(request, f"Bulk recovery completed: {resolved} row(s) resolved. {ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged.")
-    else:
-        messages.warning(request, f"No missing fields were safely resolved. {ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged.")
-    return redirect("endorsement_list")
+    try:
+        for file_obj in form.cleaned_data["attachments"]:
+            upload = RecoveryUpload.objects.create(
+                uploaded_by=request.user,
+                organization=request.user.profile.organization,
+                file=file_obj,
+                original_name=file_obj.name,
+                kind=FileIntakeService.kind_for_name(file_obj.name),
+            )
+            BulkRecoveryService.process(upload, endorsement)
+            uploads.append(upload)
+
+        failed = [u for u in uploads if u.status == RecoveryUpload.Status.FAILED]
+        if any(u.resolved_count for u in uploads):
+            WorkflowService.revalidate_after_correction(endorsement, request.user)
+
+        resolved = sum(u.resolved_count for u in uploads)
+        ambiguous = sum(u.ambiguous_count for u in uploads)
+        unmatched = sum(u.unmatched_count for u in uploads)
+
+        if failed:
+            details = "; ".join(f"{u.original_name}: {u.processing_error or 'processing failed'}" for u in failed)
+            level = messages.warning if resolved else messages.error
+            level(request, f"Bulk correction for {endorsement.reference} completed with errors. {details}")
+        elif resolved:
+            messages.success(
+                request,
+                f"Bulk correction applied only to {endorsement.reference}: {resolved} row(s) resolved; "
+                f"{ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged.",
+            )
+        else:
+            messages.warning(
+                request,
+                f"No missing fields were safely resolved for {endorsement.reference}. "
+                f"{ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged.",
+            )
+    except Exception as exc:
+        logger.exception("Bulk correction failed for endorsement %s", endorsement.pk)
+        messages.error(request, f"Bulk correction failed for {endorsement.reference}: {exc}")
+    return redirect("endorsement_detail", pk=pk)
 
 
 @login_required
@@ -199,11 +234,25 @@ def request_detail(request, pk):
     approvals = list(endorsement.approvals.all())
     for approval in approvals:
         approval.can_decide_for_user = can_decide_approval(request.user, approval)
+
+    resolution_rows = []
+    for event in endorsement.events.filter(
+        event_type__in=["ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED", "BULK_ITEM_RECOVERED"]
+    ):
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        resolution_rows.append({
+            "created_at": event.created_at,
+            "description": event.description or event.event_type,
+            "before_or_source": payload.get("before") or payload.get("source") or "—",
+            "after_or_filled": payload.get("after") or payload.get("filled") or "—",
+        })
+
     return render(request, "endorsements/detail.html", {
         "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
-        "supplemental_form": SupplementalUploadForm(), "approval_form": ApprovalDecisionForm(),
+        "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
+        "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
-        "resolution_events": endorsement.events.filter(event_type__in=["ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED", "BULK_ITEM_RECOVERED"]),
+        "resolution_rows": resolution_rows,
         "can_edit": can_edit_request(request.user, endorsement),
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
@@ -233,19 +282,58 @@ def edit_item(request, pk, item_id):
 @login_required
 def supplemental_upload(request, pk):
     endorsement = _get_accessible_request(request.user, pk)
-    if not can_edit_request(request.user, endorsement) or endorsement.status != EndorsementRequest.Status.NEEDS_INFO:
-        raise PermissionDenied
     if request.method != "POST":
-        return HttpResponse(status=405)
+        messages.error(request, "Supplemental correction only accepts uploaded files.")
+        return redirect("endorsement_detail", pk=pk)
+    if not can_edit_request(request.user, endorsement):
+        messages.error(request, "You do not have permission to correct this endorsement.")
+        return redirect("endorsement_detail", pk=pk)
+    if endorsement.status != EndorsementRequest.Status.NEEDS_INFO:
+        messages.warning(request, "Supplemental correction is only available while this endorsement needs information.")
+        return redirect("endorsement_detail", pk=pk)
+
     form = SupplementalUploadForm(request.POST, request.FILES)
-    if form.is_valid():
+    if not form.is_valid():
+        messages.error(request, f"Supplemental upload could not be processed. {_form_error_text(form)}")
+        return redirect("endorsement_detail", pk=pk)
+
+    processed = 0
+    failures = []
+    try:
         for upload in form.cleaned_data["attachments"]:
-            attachment = Attachment.objects.create(request=endorsement, file=upload, original_name=upload.name, kind=FileIntakeService.kind_for_name(upload.name), is_supplemental=True)
-            FileIntakeService.process(attachment)
-        WorkflowService.revalidate_after_correction(endorsement, request.user)
-        messages.success(request, "Supplemental files processed. Unique rows were matched and missing fields were filled where possible.")
-    else:
-        messages.error(request, "Supplemental upload could not be processed.")
+            attachment = Attachment.objects.create(
+                request=endorsement,
+                file=upload,
+                original_name=upload.name,
+                kind=FileIntakeService.kind_for_name(upload.name),
+                is_supplemental=True,
+            )
+            if FileIntakeService.process(attachment):
+                processed += 1
+            else:
+                failures.append(f"{attachment.original_name}: {attachment.processing_error or 'extraction failed'}")
+
+        if processed:
+            WorkflowService.revalidate_after_correction(endorsement, request.user)
+
+        if failures:
+            text = "; ".join(failures)
+            if processed:
+                messages.warning(
+                    request,
+                    f"{processed} supplemental file(s) were processed for {endorsement.reference}, but some failed: {text}",
+                )
+            else:
+                messages.error(request, f"Supplemental upload failed for {endorsement.reference}: {text}")
+        else:
+            messages.success(
+                request,
+                f"{processed} supplemental file(s) processed for {endorsement.reference}. "
+                "Unique rows were matched and missing fields were filled where possible.",
+            )
+    except Exception as exc:
+        logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)
+        messages.error(request, f"Supplemental upload failed for {endorsement.reference}: {exc}")
     return redirect("endorsement_detail", pk=pk)
 
 

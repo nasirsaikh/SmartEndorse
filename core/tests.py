@@ -2,13 +2,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
+from unittest.mock import patch
 
 from .access import accessible_policies, can_decide_approval
 from .models import (
     EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
-    PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile,
+    PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
 from .services import PricingEngine, ValidationService, WorkflowService
 
@@ -133,3 +135,71 @@ class ValidationAndApprovalTests(BaseInsuranceTest):
         item.save(update_fields=["validation_status"])
         with self.assertRaisesMessage(ValueError, "Card number is mandatory"):
             WorkflowService.complete(req, self.tpa_user)
+
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_resolution_event_without_filled_key_renders_detail(self):
+        PolicyAccess.objects.get_or_create(policy=self.policy, organization=self.client, defaults={"can_create": True})
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        WorkflowEvent.objects.create(
+            request=req,
+            actor=self.requester,
+            event_type="SUPPLEMENTAL_ROW_CREATED",
+            description="Supplemental upload created item 18.",
+            payload={"item_id": 18, "source": "id.pdf"},
+        )
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(f"/endorsements/{req.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "id.pdf")
+        self.assertContains(response, "Supplemental upload created item 18.")
+
+    @patch("core.views.BulkRecoveryService.process")
+    def test_bulk_recovery_is_scoped_to_selected_endorsement(self, process_mock):
+        PolicyAccess.objects.get_or_create(policy=self.policy, organization=self.client, defaults={"can_create": True})
+        selected = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        other = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        self.valid_item(selected, employee_no="SEL-1", national_id="SEL-N1")
+        self.valid_item(other, employee_no="OTH-1", national_id="OTH-N1")
+        process_mock.return_value = 0
+        http = Client()
+        http.force_login(self.requester)
+        upload = SimpleUploadedFile(
+            "correction.csv",
+            b"employee_no,date_of_birth\nSEL-1,1990-01-01\n",
+            content_type="text/csv",
+        )
+        response = http.post(
+            f"/endorsements/{selected.pk}/recovery/",
+            {"attachments": upload},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(process_mock.call_count, 1)
+        _, target = process_mock.call_args.args
+        self.assertEqual(target.pk, selected.pk)
+        self.assertNotEqual(target.pk, other.pk)

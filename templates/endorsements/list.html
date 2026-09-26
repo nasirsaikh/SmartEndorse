@@ -2,30 +2,6 @@
 {% block title %}Endorsements | SmartEndorse{% endblock %}
 {% block page_title %}Endorsement Pipeline{% endblock %}
 {% block content %}
-{% if can_create %}
-<div class="panel mb-3" x-data="fileDropzone()">
-  <div class="panel-heading">
-    <div><h3 class="h6 mb-1"><i class="bi bi-magic me-1 text-primary"></i>Bulk exception recovery</h3><p class="small text-body-secondary mb-0">Upload correction evidence once and match it safely across all editable Needs Information / Query cases.</p></div>
-    <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#bulk-recovery"><i class="bi bi-cloud-arrow-up me-1"></i>Upload corrections</button>
-  </div>
-  <div class="collapse" id="bulk-recovery">
-    <div class="p-4 border-bottom">
-      <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_bulk_recovery' %}">{% csrf_token %}
-        <div class="upload-zone" :class="{'dragging':dragging}" @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false" @drop.prevent="dragging=false;addFiles($event.dataTransfer.files)">
-          <input class="d-none" x-ref="fileInput" @change="addFiles($event.target.files)" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
-          <div class="text-center" @click="$refs.fileInput.click()"><div class="upload-icon mb-2"><i class="bi bi-layers"></i></div><strong>Drop Excel, PDF or images here</strong><div class="small text-body-secondary">SmartEndorse matches only unique Civil ID / member no. / employee no. / name + DOB. Ambiguous rows are never auto-applied.</div></div>
-          <div class="d-grid gap-2 mt-3" x-show="files.length" x-cloak><template x-for="(file,index) in files" :key="file.name+file.size"><div class="file-chip"><div><span class="file-name" x-text="file.name"></span><small class="d-block text-body-secondary" x-text="humanSize(file.size)"></small></div><button type="button" class="btn btn-sm btn-outline-danger" @click.stop="removeFile(index)"><i class="bi bi-x-lg"></i></button></div></template></div>
-        </div>
-        <div class="d-flex justify-content-between align-items-center mt-3"><div class="small text-body-secondary"><i class="bi bi-shield-lock me-1"></i>Only missing fields are filled. Existing values are not overwritten.</div><button class="btn btn-primary" type="submit"><span class="btn-label"><i class="bi bi-stars me-1"></i>Match & revalidate cases</span><span class="btn-spinner spinner-border spinner-border-sm d-none"></span></button></div>
-      </form>
-    </div>
-    {% if recent_recovery_uploads %}
-    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Recovery upload</th><th>Status</th><th>Resolved</th><th>Ambiguous</th><th>Unmatched</th></tr></thead><tbody>{% for upload in recent_recovery_uploads %}<tr><td>{{ upload.reference }}<div class="small text-body-secondary">{{ upload.original_name }} · {{ upload.created_at|date:"d M H:i" }}</div></td><td><span class="badge {% if upload.status == 'PROCESSED' %}text-bg-success{% elif upload.status == 'FAILED' %}text-bg-danger{% else %}text-bg-warning{% endif %}">{{ upload.get_status_display }}</span></td><td>{{ upload.resolved_count }}</td><td>{{ upload.ambiguous_count }}</td><td>{{ upload.unmatched_count }}</td></tr>{% endfor %}</tbody></table></div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
 <div class="panel">
   <div class="panel-heading flex-wrap gap-3">
     <form class="row g-2 flex-grow-1" hx-get="{% url 'endorsement_list' %}" hx-target="#request-table" hx-push-url="true" hx-trigger="change, keyup changed delay:350ms from:#search-q">

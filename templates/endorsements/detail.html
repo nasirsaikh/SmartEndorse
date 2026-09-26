@@ -93,8 +93,64 @@
     </div>
     {% endif %}
 
-    {% if resolution_events %}
-    <div class="panel mb-3"><div class="panel-heading"><div><h3 class="h6 mb-1">Resolved / changed records</h3><p class="small text-body-secondary mb-0">Separate change view for corrections and supplemental recovery.</p></div></div><div class="table-responsive"><table class="table mb-0"><thead><tr><th>When</th><th>Action</th><th>Before / source</th><th>After / filled</th></tr></thead><tbody>{% for event in resolution_events %}<tr><td class="text-nowrap">{{ event.created_at|date:"d M H:i" }}</td><td>{{ event.description }}</td><td><div class="resolution-before">{{ event.payload.before|default:event.payload.source|default:"—" }}</div></td><td><div class="resolution-after">{{ event.payload.after|default:event.payload.filled|default:"—" }}</div></td></tr>{% endfor %}</tbody></table></div></div>
+    {% if endorsement.status == "NEEDS_INFO" and can_edit %}
+    <div class="panel p-4 mb-3" x-data="fileDropzone()">
+      <div class="section-title"><i class="bi bi-file-earmark-spreadsheet"></i> Bulk correction — this endorsement only</div>
+      <p class="text-body-secondary mb-3">
+        Upload Excel, CSV, PDF or images for <strong>{{ endorsement.reference }}</strong> only.
+        Matching is restricted to this endorsement's member rows. Existing populated values are never overwritten,
+        and ambiguous or unmatched rows are left unchanged.
+      </p>
+      <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_bulk_recovery' endorsement.pk %}">
+        {% csrf_token %}
+        <div class="upload-zone" :class="{'dragging':dragging}" @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false" @drop.prevent="dragging=false;addFiles($event.dataTransfer.files)">
+          <input class="d-none" x-ref="fileInput" @change="addFiles($event.target.files)" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
+          <div class="text-center" @click="$refs.fileInput.click()">
+            <div class="upload-icon mb-2"><i class="bi bi-layers"></i></div>
+            <strong>Drop correction files for {{ endorsement.reference }}</strong>
+            <div class="small text-body-secondary">Unique Civil ID / member no. / employee no. / name + DOB matching only.</div>
+          </div>
+          <div class="d-grid gap-2 mt-3" x-show="files.length" x-cloak>
+            <template x-for="(file,index) in files" :key="file.name+file.size">
+              <div class="file-chip">
+                <div><span class="file-name" x-text="file.name"></span><small class="d-block text-body-secondary" x-text="humanSize(file.size)"></small></div>
+                <button type="button" class="btn btn-sm btn-outline-danger" @click.stop="removeFile(index)"><i class="bi bi-x-lg"></i></button>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center gap-3 mt-3">
+          <div class="small text-body-secondary"><i class="bi bi-shield-check me-1"></i>No other endorsement can be changed by this upload.</div>
+          <button class="btn btn-outline-primary" type="submit">
+            <span class="btn-label"><i class="bi bi-stars me-1"></i>Correct this endorsement</span>
+            <span class="btn-spinner spinner-border spinner-border-sm d-none"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if resolution_rows %}
+    <div class="panel mb-3">
+      <div class="panel-heading">
+        <div><h3 class="h6 mb-1">Resolved / changed records</h3><p class="small text-body-secondary mb-0">Separate change view for manual corrections and document recovery.</p></div>
+      </div>
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead><tr><th>When</th><th>Action</th><th>Before / source</th><th>After / filled</th></tr></thead>
+          <tbody>
+          {% for row in resolution_rows %}
+            <tr>
+              <td class="text-nowrap">{{ row.created_at|date:"d M H:i" }}</td>
+              <td>{{ row.description }}</td>
+              <td><div class="resolution-before">{{ row.before_or_source }}</div></td>
+              <td><div class="resolution-after">{{ row.after_or_filled }}</div></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
     {% endif %}
 
     <div class="panel p-4 mb-3">
