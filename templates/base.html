@@ -21,7 +21,6 @@
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.default.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
 
   <script src="https://unpkg.com/htmx.org@2.0.7"></script>
@@ -35,19 +34,11 @@
   <div class="drawer-content flex min-w-0 flex-col">
     <header class="se-topbar sticky top-0 z-40 border-b border-base-content/10 bg-base-100/95 backdrop-blur">
       <div class="navbar min-h-14 px-3 lg:px-5">
-        <div class="navbar-start gap-2">
-          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm" aria-label="Open navigation" title="Open navigation">
+        <div class="navbar-start flex-1 gap-2">
+          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm shrink-0" aria-label="Open navigation" title="Open navigation">
             <i class="bi bi-layout-sidebar-inset text-lg"></i>
           </label>
-          <div class="hidden sm:flex items-center gap-3">
-            <span class="status status-success animate-pulse"></span>
-            <div class="text-[10px] uppercase tracking-[.2em] opacity-60">System status</div>
-            <div class="text-xs font-semibold text-success">All services nominal</div>
-          </div>
-        </div>
-
-        <div class="navbar-center hidden flex-1 justify-center px-4 md:flex">
-          <form method="get" action="{% url 'endorsement_list' %}" class="w-full max-w-xl">
+          <form method="get" action="{% url 'endorsement_list' %}" class="w-full max-w-2xl">
             <label class="input input-sm input-bordered flex w-full items-center gap-2 bg-base-200/60">
               <i class="bi bi-search opacity-45"></i>
               <input type="search" name="q" class="grow" placeholder="Global search: request, policy, client, member, Civil ID..." aria-label="Global search">
@@ -57,10 +48,6 @@
         </div>
 
         <div class="navbar-end gap-1">
-          <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm hidden md:inline-flex">
-            <i class="bi bi-search"></i><span>Find request</span>
-          </a>
-
           <div class="dropdown dropdown-end">
             <button tabindex="0" class="btn btn-ghost btn-square btn-sm relative" type="button" onclick="window.enableBrowserNotifications?.()" aria-label="Notifications">
               <i class="bi bi-bell text-lg"></i>
@@ -206,7 +193,6 @@
   {% block unauthenticated %}{% endblock %}
 {% endif %}
 
-<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
 <script src="{% static 'js/app.js' %}"></script>
 </body>
 </html>
