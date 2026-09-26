@@ -153,7 +153,15 @@ def request_list(request):
             "premium": premium,
         },
     }
-    return render(request, "endorsements/_table.html" if getattr(request, "htmx", False) else "endorsements/list.html", context)
+    is_table_refresh = (
+        request.headers.get("HX-Request", "").lower() == "true"
+        and request.headers.get("HX-Target") == "request-table"
+    )
+    return render(
+        request,
+        "endorsements/_table.html" if is_table_refresh else "endorsements/list.html",
+        context,
+    )
 
 
 @login_required

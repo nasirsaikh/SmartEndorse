@@ -116,6 +116,46 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertContains(response, 'name="product"')
         self.assertContains(response, 'name="type"')
 
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_boosted_navigation_to_pipeline_returns_full_dashboard_page(self):
+        self.grant_client_access()
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(
+            "/endorsements/",
+            HTTP_HX_REQUEST="true",
+            HTTP_HX_BOOSTED="true",
+            HTTP_HX_TARGET="body",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ENDORSEMENT PIPELINE")
+        self.assertContains(response, "SEARCH & SEGMENT REQUESTS")
+        self.assertContains(response, "Global search: request, policy, client, member, Civil ID")
+        self.assertContains(response, 'id="request-table"')
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_pipeline_filter_refresh_returns_table_partial_only(self):
+        self.grant_client_access()
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(
+            "/endorsements/",
+            {"status": EndorsementRequest.Status.NEEDS_INFO},
+            HTTP_HX_REQUEST="true",
+            HTTP_HX_TARGET="request-table",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reference")
+        self.assertNotContains(response, "SEARCH & SEGMENT REQUESTS")
+        self.assertNotContains(response, "Global search: request, policy, client, member, Civil ID")
+
+
     def test_item_correction_uses_policy_dropdowns_and_plan_sum_assured(self):
         self.plan.sum_assured = Decimal("50000.000")
         self.plan.save(update_fields=["sum_assured"])
