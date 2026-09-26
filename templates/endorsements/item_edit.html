@@ -1,28 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Correct Item | {{ endorsement.reference }}{% endblock %}
-{% block page_title %}Correct Endorsement Item{% endblock %}
+{% block title %}Correct item | {{ endorsement.reference }}{% endblock %}
+{% block page_title %}Correct endorsement item{% endblock %}
+{% block object_tools %}
+<ul class="portal-object-tools"><li><a href="{% url 'endorsement_detail' endorsement.pk %}">View endorsement</a></li></ul>
+{% endblock %}
 {% block content %}
-<div class="row justify-content-center"><div class="col-xl-9">
-  <div class="panel p-4">
-    <div class="d-flex justify-content-between align-items-start mb-4"><div><div class="eyebrow">{{ endorsement.reference }}</div><h2 class="h5 mb-1">Correct item #{{ item.pk }}</h2><div class="text-body-secondary">Only correct information supported by the source/client record. Every change is retained in the audit trail.</div></div><a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a></div>
-    {% if item.validation_errors %}<div class="alert alert-warning"><strong>Current errors</strong><ul class="mb-0 mt-2">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
-    <form method="post">{% csrf_token %}
-      <div class="row g-3">
-        <div class="col-md-6"><div class="form-floating">{{ form.full_name }}<label>Full name</label></div></div>
-        <div class="col-md-3"><div class="form-floating">{{ form.member_no }}<label>Member no.</label></div></div>
-        <div class="col-md-3"><div class="form-floating">{{ form.employee_no }}<label>Employee no.</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.national_id }}<label>Civil / National ID</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.relationship }}<label>Relationship</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.date_of_birth }}<label>Date of birth</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.gender }}<label>Gender</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.plan }}<label>Plan</label></div></div>
-        <div class="col-md-4"><div class="form-floating">{{ form.effective_date }}<label>Effective date</label></div></div>
-        <div class="col-md-6"><div class="form-floating">{{ form.annual_salary }}<label>Annual salary</label></div></div>
-        <div class="col-md-6"><div class="form-floating">{{ form.sum_assured }}<label>Sum assured</label></div></div>
-      </div>
-      <div class="d-flex justify-content-end gap-2 mt-4"><a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-outline-secondary">Cancel</a><button class="btn btn-primary" type="submit"><span class="btn-label"><i class="bi bi-check2-circle me-1"></i>Save & revalidate</span><span class="btn-spinner spinner-border spinner-border-sm d-none"></span></button></div>
-    </form>
-    <details class="mt-4"><summary class="fw-semibold">Original extraction JSON</summary><pre class="json-preview mt-2">{{ item.extracted_data }}</pre></details>
+{% if item.validation_errors %}
+<div class="error-summary">
+  <strong>Current validation errors</strong>
+  <ul>{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<form method="post" class="portal-form">
+  {% csrf_token %}
+  <fieldset class="module">
+    <h2>{{ endorsement.reference }} · item #{{ item.pk }}</h2>
+    <p class="module-description">Correct only information supported by the source or client record. All changes are retained in the audit trail.</p>
+    <div class="portal-form-grid">
+      <div class="form-row span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
+      <div class="form-row span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
+      <div class="form-row span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
+      <div class="form-row span-4"><label>Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
+      <div class="form-row span-4"><label>Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
+      <div class="form-row span-4"><label>Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
+      <div class="form-row span-4"><label>Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
+      <div class="form-row span-4"><label>Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
+      <div class="form-row span-4"><label>Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
+      <div class="form-row span-6"><label>Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
+      <div class="form-row span-6"><label>Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
+    </div>
+  </fieldset>
+  <div class="submit-row">
+    <a class="button button-secondary" href="{% url 'endorsement_detail' endorsement.pk %}">Cancel</a>
+    <button class="button default" type="submit"><span class="btn-label">Save and revalidate</span><span class="portal-spinner" aria-hidden="true"></span></button>
   </div>
-</div></div>
+</form>
+
+<section class="module">
+  <h2>Original extraction data</h2>
+  <div class="module-content"><pre class="json-preview">{{ item.extracted_data }}</pre></div>
+</section>
 {% endblock %}
