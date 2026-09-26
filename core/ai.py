@@ -861,7 +861,7 @@ class AIService:
         url = base + "/api/chat"
         options = self._ollama_runtime_options(vision=True)
         options["num_ctx"] = min(int(options.get("num_ctx") or 4096), 4096)
-        options["num_predict"] = min(int(options.get("num_predict") or 256), 256)
+        options["num_predict"] = min(int(options.get("num_predict") or 512), 512)
         options["temperature"] = 0.0
 
         prompt = (
