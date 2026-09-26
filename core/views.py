@@ -845,9 +845,8 @@ def edit_item(request, pk, item_id):
                 description=f"Item {item.pk} corrected manually.",
                 payload={"item_id": item.pk, "before": before, "after": {k: json_safe(v) for k, v in form.cleaned_data.items()}},
             )
-            WorkflowService.revalidate_after_correction(endorsement, request.user)
-            messages.success(request, "Item updated and the endorsement was revalidated.")
-            return redirect("endorsement_detail", pk=pk)
+            messages.success(request, "Item updated in Intake. Review the member list, then continue to Validation when ready.")
+            return redirect(f"/endorsements/{pk}/?step=intake")
     else:
         form = EndorsementItemCorrectionForm(instance=item)
 
