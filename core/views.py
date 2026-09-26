@@ -18,7 +18,7 @@ from .access import (
 )
 from .forms import (
     ApprovalDecisionForm, BulkRecoveryForm, EndorsementCreateForm, EndorsementItemCorrectionForm,
-    ItemOCRFillForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
+    ItemOCRFillForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm, UserProfileForm,
 )
 from .models import (
     Attachment, BOOTSWATCH_THEMES, EndorsementApproval, EndorsementItem,
@@ -295,16 +295,14 @@ def create_request(request):
                 except Exception:
                     logger.exception("Initial evidence bundle failed for endorsement %s", endorsement.pk)
 
-            WorkflowEvent.objects.create(request=endorsement, actor=request.user, event_type="REQUEST_CREATED", description="Endorsement request created.")
-            WorkflowService.submit(endorsement, request.user)
-            if endorsement.status == EndorsementRequest.Status.NEEDS_INFO:
-                messages.warning(request, "Request created, but processing is blocked until all validation errors are corrected.")
-            elif endorsement.status in {EndorsementRequest.Status.PENDING_INSURER_APPROVAL, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}:
-                messages.warning(request, "Request requires approval before it can continue.")
-            elif endorsement.status == EndorsementRequest.Status.FAILED:
-                messages.error(request, "Validation passed, but automatic dispatch failed. Insurer operations can review the exception.")
-            else:
-                messages.success(request, f"{endorsement.reference} submitted successfully.")
+            WorkflowEvent.objects.create(
+                request=endorsement, actor=request.user, event_type="REQUEST_CREATED",
+                description="Endorsement intake created. Extracted records are ready for requester review before validation.",
+            )
+            messages.success(
+                request,
+                f"{endorsement.reference} intake created. Review extracted/member data, add or remove rows if required, then use Validate & Submit.",
+            )
             return redirect("endorsement_detail", pk=endorsement.pk)
     else:
         form = EndorsementCreateForm(policies=policies)
@@ -317,7 +315,7 @@ def _get_accessible_request(user, pk):
 
 def _wizard(endorsement):
     stages = [
-        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.VALIDATING, EndorsementRequest.Status.NEEDS_INFO}),
+        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED}),
         ("Validated", {EndorsementRequest.Status.SUBMITTED, EndorsementRequest.Status.PENDING_INSURER_APPROVAL}),
         ("Approved", {EndorsementRequest.Status.AUTO_APPROVED, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}),
         ("TPA / Core", {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.CORE_DISPATCHED}),
@@ -325,6 +323,49 @@ def _wizard(endorsement):
     ]
     index = next((i for i, (_, states) in enumerate(stages) if endorsement.status in states), 0)
     return [{"label": label, "state": "done" if i < index else "active" if i == index else "pending"} for i, (label, _) in enumerate(stages)]
+
+
+def _workflow_sla_rows(endorsement):
+    now = timezone.now()
+    events = list(endorsement.events.filter(event_type="STATUS_CHANGE").order_by("created_at"))
+    stage_defs = [
+        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED}, endorsement.policy.client_query_sla),
+        ("Validation", {EndorsementRequest.Status.VALIDATING, EndorsementRequest.Status.SUBMITTED}, endorsement.policy.insurer_sla),
+        ("Insurance approval", {EndorsementRequest.Status.PENDING_INSURER_APPROVAL, EndorsementRequest.Status.AUTO_APPROVED, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}, endorsement.policy.insurer_sla),
+        ("TPA / Core processing", {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.CORE_DISPATCHED}, endorsement.policy.tpa_sla if endorsement.policy.product == Policy.Product.GROUP_MEDICAL else endorsement.policy.insurer_sla),
+        ("Completed", {EndorsementRequest.Status.COMPLETED}, None),
+    ]
+    transition_times = {}
+    for event in events:
+        transition_times.setdefault(event.to_status, event.created_at)
+    rows = []
+    cursor = endorsement.created_at
+    total_target = 0
+    for label, statuses, profile in stage_defs[:-1]:
+        entered = min([transition_times[x] for x in statuses if x in transition_times], default=(endorsement.created_at if label == "Intake" else None))
+        later = [event.created_at for event in events if entered and event.created_at > entered and event.to_status not in statuses]
+        ended = min(later) if later else (endorsement.completed_at if endorsement.completed_at else now if endorsement.status in statuses else None)
+        actual_hours = round(((ended - entered).total_seconds() / 3600), 1) if entered and ended else None
+        target_hours = profile.target_hours if profile else (24 if label == "Intake" else 8 if label == "Validation" else 24)
+        total_target += target_hours
+        rows.append({
+            "label": label,
+            "target_hours": target_hours,
+            "actual_hours": actual_hours,
+            "breached": actual_hours is not None and actual_hours > target_hours,
+            "active": endorsement.status in statuses,
+        })
+        if entered:
+            cursor = entered
+    total_actual = round((((endorsement.completed_at or now) - endorsement.created_at).total_seconds() / 3600), 1)
+    rows.append({
+        "label": "Total",
+        "target_hours": total_target,
+        "actual_hours": total_actual,
+        "breached": total_actual > total_target,
+        "active": endorsement.status != EndorsementRequest.Status.COMPLETED,
+    })
+    return rows
 
 
 @login_required
@@ -397,6 +438,8 @@ def request_detail(request, pk):
         "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
+        "sla_rows": _workflow_sla_rows(endorsement),
+        "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
         "resolution_rows": resolution_rows,
         "member_issues": member_issues,
         "document_issues": document_issues,
@@ -404,7 +447,7 @@ def request_detail(request, pk):
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit_request(request.user, endorsement),
         "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
-            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED,
         },
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
@@ -469,8 +512,9 @@ def revalidate_request(request, pk):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
-        messages.warning(request, "Revalidation is only available while the endorsement is still being corrected.")
+        messages.warning(request, "Validation is only available while the endorsement is in intake/correction.")
         return redirect("endorsement_detail", pk=pk)
 
     WorkflowService.revalidate_after_correction(endorsement, request.user)
@@ -792,7 +836,7 @@ def tpa_update_item(request, pk, item_id):
     item = get_object_or_404(endorsement.items, pk=item_id)
     form = TPAItemProcessingForm(request.POST, item=item)
     if form.is_valid():
-        approval = WorkflowService.update_tpa_item(item, request.user, form.cleaned_data["card_number"], form.cleaned_data["amount"])
+        approval = WorkflowService.update_tpa_item(item, request.user, form.cleaned_data["card_number"], form.cleaned_data["effective_date"], form.cleaned_data["amount"])
         messages.warning(request, "Amount changed; approval was raised and relevant parties were notified.") if approval else messages.success(request, "TPA member processing data updated.")
     else:
         messages.error(request, "Card number and amount are required.")
@@ -809,7 +853,12 @@ def decide_approval(request, pk, approval_id):
         raise PermissionDenied
     form = ApprovalDecisionForm(request.POST)
     if form.is_valid():
-        WorkflowService.decide_approval(approval, request.user, form.cleaned_data["decision"] == "approve", form.cleaned_data["comment"])
+        approving = form.cleaned_data["decision"] == "approve"
+        comment = form.cleaned_data["comment"].strip()
+        if not approving and not comment:
+            messages.error(request, "Rejection reason is mandatory. Explain what must be corrected before resubmission.")
+            return redirect("endorsement_detail", pk=pk)
+        WorkflowService.decide_approval(approval, request.user, approving, comment)
         messages.success(request, "Approval decision recorded with full audit history.")
     return redirect("endorsement_detail", pk=pk)
 
@@ -859,6 +908,45 @@ def answer_query(request, pk, query_id):
         WorkflowService.answer_query(query, request.user, form.cleaned_data["response"])
         messages.success(request, "Response submitted.")
     return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
+def add_item(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED, EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.error(request, "Members can only be added during intake/correction.")
+        return redirect("endorsement_detail", pk=pk)
+    instance = EndorsementItem(request=endorsement, effective_date=endorsement.effective_date, extracted_data={"source": "manual_entry"})
+    form = EndorsementItemCorrectionForm(request.POST, instance=instance)
+    if form.is_valid():
+        item = form.save()
+        WorkflowEvent.objects.create(
+            request=endorsement, actor=request.user, event_type="MANUAL_ITEM_ADDED",
+            description=f"Member item {item.pk} added manually during intake.",
+            payload={"item_id": item.pk, "full_name": item.full_name, "member_no": item.member_no},
+        )
+        messages.success(request, "Member added. Review the intake and run Validate & Submit when ready.")
+    else:
+        messages.error(request, f"Member could not be added. {_form_error_text(form)}")
+    return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
+def profile(request):
+    profile_obj = request.user.profile
+    form = UserProfileForm(request.POST or None, request.FILES or None, instance=profile_obj, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Profile updated successfully.")
+        return redirect("profile")
+    return render(request, "profile.html", {"form": form})
 
 
 @login_required
