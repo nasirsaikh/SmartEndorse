@@ -16,7 +16,7 @@
         </tr>
       </thead>
       <tbody>
-      {% for item in endorsement.items.all %}
+      {% for item in items %}
         <tr>
           <td>
             <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
