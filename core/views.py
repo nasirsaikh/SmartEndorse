@@ -401,6 +401,14 @@ def request_detail(request, pk):
          if approval.status == EndorsementApproval.Status.REJECTED and approval.decision_comment),
         None,
     )
+    latest_rejection_reason = latest_rejection.decision_comment if latest_rejection else ""
+    if not latest_rejection_reason:
+        rejection_event = endorsement.events.filter(
+            event_type="STATUS_CHANGE", to_status=EndorsementRequest.Status.REJECTED
+        ).order_by("-created_at").first()
+        if rejection_event:
+            payload = rejection_event.payload if isinstance(rejection_event.payload, dict) else {}
+            latest_rejection_reason = payload.get("rejection_reason") or payload.get("reason") or rejection_event.description
     for approval in approvals:
         approval.can_decide_for_user = can_decide_approval(request.user, approval)
 
@@ -461,6 +469,7 @@ def request_detail(request, pk):
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
         "sla_rows": _workflow_sla_rows(endorsement),
         "latest_rejection": latest_rejection,
+        "latest_rejection_reason": latest_rejection_reason,
         "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
         "resolution_rows": resolution_rows,
         "member_issues": member_issues,
@@ -469,7 +478,8 @@ def request_detail(request, pk):
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit_request(request.user, endorsement),
         "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
-            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED,
+            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+            EndorsementRequest.Status.REJECTED, EndorsementRequest.Status.TPA_QUERY,
         },
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
@@ -544,7 +554,7 @@ def revalidate_request(request, pk):
     if endorsement.validation_errors:
         messages.warning(request, f"Revalidation completed with {len(endorsement.validation_errors)} blocking issue(s).")
     else:
-        messages.success(request, "Revalidation passed. No blocking validation issues remain.")
+        messages.success(request, f"Validation passed. The request is now {endorsement.get_status_display()} and has been routed to the next workflow step.")
     return redirect("endorsement_detail", pk=pk)
 
 
