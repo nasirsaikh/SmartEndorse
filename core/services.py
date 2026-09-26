@@ -473,6 +473,9 @@ class FileIntakeService:
         existing = None
         if request_obj.endorsement_type == EndorsementRequest.Type.DELETION and member_no:
             existing = PolicyMember.objects.filter(policy=request_obj.policy, member_no=member_no, is_active=True).select_related("plan").first()
+        resolved_plan = plan or (existing.plan if existing else None)
+        source_sum_assured = cls._decimal(row.get("sum_assured")) if row.get("sum_assured") not in (None, "") else (existing.sum_assured if existing else None)
+        sum_assured = resolved_plan.sum_assured if resolved_plan and resolved_plan.sum_assured is not None else source_sum_assured
         return {
             "member_no": member_no,
             "employee_no": str(row.get("employee_no") or (existing.employee_no if existing else "") or "").strip(),
@@ -481,9 +484,9 @@ class FileIntakeService:
             "relationship": str(row.get("relationship") or (existing.relationship if existing else "") or "").strip(),
             "date_of_birth": cls._date(row.get("date_of_birth")) or (existing.date_of_birth if existing else None),
             "gender": str(row.get("gender") or (existing.gender if existing else "") or "").strip(),
-            "plan": plan or (existing.plan if existing else None),
+            "plan": resolved_plan,
             "annual_salary": cls._decimal(row.get("annual_salary")) if row.get("annual_salary") not in (None, "") else (existing.annual_salary if existing else None),
-            "sum_assured": cls._decimal(row.get("sum_assured")) if row.get("sum_assured") not in (None, "") else (existing.sum_assured if existing else None),
+            "sum_assured": sum_assured,
             "effective_date": cls._date(row.get("effective_date")) or request_obj.effective_date,
         }
 
@@ -534,54 +537,108 @@ class FileIntakeService:
     @staticmethod
     def _candidate_match(request_obj, row):
         qs = request_obj.items.all()
+        ambiguous = False
         for field in ("national_id", "member_no", "employee_no"):
             value = str(row.get(field) or "").strip()
             if value:
                 matches = list(qs.filter(**{f"{field}__iexact": value})[:2])
                 if len(matches) == 1:
-                    return matches[0], field
+                    return matches[0], field, False
+                if len(matches) > 1:
+                    ambiguous = True
         name = str(row.get("full_name") or "").strip()
         dob = FileIntakeService._date(row.get("date_of_birth"))
         if name and dob:
             matches = list(qs.filter(full_name__iexact=name, date_of_birth=dob)[:2])
             if len(matches) == 1:
-                return matches[0], "name+dob"
-        return None, ""
+                return matches[0], "name+dob", False
+            if len(matches) > 1:
+                ambiguous = True
+        return None, "", ambiguous
 
     @classmethod
     def _recover_items(cls, request_obj, rows, attachment):
-        resolved, created, unmatched = 0, 0, 0
+        updated, created, ambiguous, unmatched = 0, 0, 0, 0
         editable = ["member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date"]
         for row in rows:
-            item, matched_by = cls._candidate_match(request_obj, row)
+            item, matched_by, is_ambiguous = cls._candidate_match(request_obj, row)
             values = cls._to_item_values(request_obj, row)
+
+            if is_ambiguous and not item:
+                ambiguous += 1
+                WorkflowEvent.objects.create(
+                    request=request_obj,
+                    event_type="VALIDATION_ROW_AMBIGUOUS",
+                    description=f"Validation upload row from {attachment.original_name} was not applied because multiple members matched.",
+                    payload={"source": attachment.original_name, "row": json_safe(row)},
+                )
+                continue
+
             if not item:
                 if any(values.get(k) for k in ("member_no", "employee_no", "national_id", "full_name")):
                     item = EndorsementItem.objects.create(
                         request=request_obj,
-                        extracted_data=json_safe({"normalized": row, "source_raw": row.get("_source_raw", {}), "source_attachment_id": attachment.pk, "supplemental": True}),
+                        extracted_data=json_safe({
+                            "normalized": row,
+                            "source_raw": row.get("_source_raw", {}),
+                            "source_attachment_id": attachment.pk,
+                            "validation_upsert": True,
+                        }),
                         **values,
                     )
                     created += 1
-                    WorkflowEvent.objects.create(request=request_obj, event_type="SUPPLEMENTAL_ROW_CREATED", description=f"Supplemental upload created item {item.pk}.", payload={"item_id": item.pk, "source": attachment.original_name})
+                    WorkflowEvent.objects.create(
+                        request=request_obj,
+                        event_type="VALIDATION_ROW_CREATED",
+                        description=f"Validation upload added item {item.pk} from {attachment.original_name}.",
+                        payload={"item_id": item.pk, "source": attachment.original_name},
+                    )
                 else:
                     unmatched += 1
                 continue
+
             before = {f: json_safe(getattr(item, f + "_id") if f == "plan" else getattr(item, f)) for f in editable}
             changed = {}
             for field in editable:
                 value = values.get(field)
                 current = getattr(item, field)
-                if value not in (None, "") and current in (None, ""):
+                current_compare = current.pk if field == "plan" and current else current
+                value_compare = value.pk if field == "plan" and value else value
+                if value not in (None, "") and current_compare != value_compare:
                     setattr(item, field, value)
-                    changed[field] = json_safe(value.pk if field == "plan" and value else value)
+                    changed[field] = json_safe(value_compare)
+
             if changed:
-                item.resolution_data = {**(item.resolution_data or {}), "last_recovery": {"matched_by": matched_by, "source": attachment.original_name, "fields": changed}}
-                item.extracted_data = {**(item.extracted_data or {}), "supplemental_sources": [*((item.extracted_data or {}).get("supplemental_sources", [])), json_safe(row.get("_source_raw", row))]}
+                item.resolution_data = {
+                    **(item.resolution_data or {}),
+                    "last_validation_upsert": {
+                        "matched_by": matched_by,
+                        "source": attachment.original_name,
+                        "fields": changed,
+                    },
+                }
+                item.extracted_data = {
+                    **(item.extracted_data or {}),
+                    "supplemental_sources": [
+                        *((item.extracted_data or {}).get("supplemental_sources", [])),
+                        json_safe(row.get("_source_raw", row)),
+                    ],
+                }
                 item.save()
-                resolved += 1
-                WorkflowEvent.objects.create(request=request_obj, event_type="ITEM_RECOVERED", description=f"Item {item.pk} supplemented from {attachment.original_name}.", payload={"item_id": item.pk, "matched_by": matched_by, "before": before, "filled": changed})
-        return {"resolved_items": resolved, "created_items": created, "unmatched_rows": unmatched}
+                updated += 1
+                WorkflowEvent.objects.create(
+                    request=request_obj,
+                    event_type="ITEM_RECOVERED",
+                    description=f"Item {item.pk} updated from validation upload {attachment.original_name}.",
+                    payload={"item_id": item.pk, "matched_by": matched_by, "before": before, "filled": changed},
+                )
+        return {
+            "resolved_items": updated,
+            "updated_items": updated,
+            "created_items": created,
+            "ambiguous_rows": ambiguous,
+            "unmatched_rows": unmatched,
+        }
 
 
 class BulkRecoveryService:
