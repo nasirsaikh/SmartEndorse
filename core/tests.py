@@ -600,6 +600,71 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(row["effective_date"], "15/09/2026")
         self.assertEqual(row["_source_raw"]["extraction_mode"], "direct_form_fill")
 
+    def test_passport_labels_fill_name_dob_gender_without_guessing_plan_or_relationship(self):
+        ai = AIService(product=Policy.Product.GROUP_MEDICAL)
+        text = (
+            "Passport No.: X1234567\n"
+            "Surname: DOE\n"
+            "Given Name(s): JOHN MICHAEL\n"
+            "Nationality: TESTLAND\n"
+            "Date of Birth: 01/02/1990\n"
+            "Sex: M\n"
+        )
+
+        row = ai.extract_form_fields_from_text(text)
+
+        self.assertEqual(row["full_name"], "John Michael Doe")
+        self.assertEqual(row["date_of_birth"], "01/02/1990")
+        self.assertEqual(row["gender"], "M")
+        self.assertIsNone(row["relationship"])
+        self.assertIsNone(row["plan_code"])
+        self.assertEqual(row["_source_raw"]["document_type"], "passport")
+        self.assertEqual(row["_source_raw"]["passport"]["passport_no"], "X1234567")
+
+    def test_passport_mrz_fallback_fills_name_dob_gender(self):
+        ai = AIService(product=Policy.Product.GROUP_MEDICAL)
+        text = (
+            "MRZ1: P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+            "MRZ2: L898902C36UTO7408122F1204159ZE184226B<<<<<10\n"
+        )
+
+        row = ai.extract_form_fields_from_text(text)
+
+        self.assertEqual(row["full_name"], "Anna Maria Eriksson")
+        self.assertEqual(row["date_of_birth"], "1974-08-12")
+        self.assertEqual(row["gender"], "Female")
+        self.assertEqual(row["_source_raw"]["document_type"], "passport")
+        self.assertEqual(row["_source_raw"]["passport"]["passport_no"], "L898902C3")
+
+    @patch.object(AIService, "_rotate_image_bytes", return_value=(b"rotated-image", "image/png"))
+    @patch.object(
+        AIService,
+        "_vision_form_text",
+        side_effect=[
+            "unstructured unreadable output",
+            "Surname: DOE\nGiven Names: JANE\nDate of Birth: 05/04/1991\nSex: F",
+        ],
+    )
+    def test_rotated_passport_retries_90_degrees_when_first_ocr_has_no_fields(self, ocr_mock, rotate_mock):
+        glm = AIProviderConfig.objects.create(
+            name="GLM OCR Rotated Passport",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        ai = AIService(config=glm)
+
+        row = ai.extract_form_fields_from_image_bytes(b"sideways", "image/jpeg")
+
+        self.assertEqual(row["full_name"], "Jane Doe")
+        self.assertEqual(row["date_of_birth"], "05/04/1991")
+        self.assertEqual(row["gender"], "F")
+        self.assertEqual(row["_source_raw"]["rotation_retry"], "90_clockwise")
+        self.assertEqual(ocr_mock.call_count, 2)
+        rotate_mock.assert_called_once()
+
     @patch.object(
         AIService,
         "_vision_form_text",
@@ -674,7 +739,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
         self.assertNotIn("format", payload)
         self.assertEqual(payload["options"]["num_ctx"], 4096)
-        self.assertEqual(payload["options"]["num_predict"], 512)
+        self.assertEqual(payload["options"]["num_predict"], 256)
         self.assertEqual(payload["options"]["temperature"], 0.0)
         self.assertIn("do not return JSON", payload["messages"][0]["content"])
         self.assertTrue(payload["messages"][0]["images"])
