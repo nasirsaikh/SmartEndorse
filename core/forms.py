@@ -105,6 +105,19 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
         self.fields["effective_date"].initial = timezone.localdate()
         self.apply_bootstrap()
 
+    def clean(self):
+        cleaned = super().clean()
+        attachments = cleaned.get("attachments") or []
+        has_manual = any(
+            cleaned.get(field)
+            for field in ("member_no", "employee_no", "national_id", "full_name")
+        )
+        if not attachments and not has_manual:
+            raise forms.ValidationError(
+                "Provide at least one source: upload one or more files, or enter a member manually."
+            )
+        return cleaned
+
     def manual_item_payload(self):
         return {
             "member_no": self.cleaned_data.get("member_no", ""),
