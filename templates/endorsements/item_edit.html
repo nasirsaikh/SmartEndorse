@@ -1,42 +1,95 @@
 {% extends "base.html" %}
 {% block title %}Correct Item | {{ endorsement.reference }}{% endblock %}
-{% block page_kicker %}SmartEndorse / {{ endorsement.reference }} / Correction{% endblock %}
+{% block page_kicker %}SmartEndorse / {{ endorsement.reference }} / Validation correction{% endblock %}
 {% block page_title %}CORRECT MEMBER ITEM{% endblock %}
 {% block object_tools %}<a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO REQUEST</a>{% endblock %}
 {% block content %}
+
 {% if item.validation_errors %}
-<div class="alert alert-warning mb-4"><i class="bi bi-exclamation-triangle"></i><div><strong>Current validation errors</strong><ul class="mt-1 list-disc pl-5 text-xs">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul></div></div>
+<div class="alert alert-warning mb-4 items-start">
+  <i class="bi bi-exclamation-triangle mt-0.5"></i>
+  <div>
+    <strong>Current validation errors</strong>
+    <ul class="mt-1 list-disc pl-5 text-xs">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+  </div>
+</div>
 {% endif %}
 
-<form method="post" class="space-y-4">
-  {% csrf_token %}
-  <section class="se-panel">
-    <div class="se-panel-head">
-      <div><div class="se-eyebrow">{{ endorsement.reference }}</div><div class="se-panel-title mt-1">ITEM #{{ item.pk }} / VERIFIED CORRECTION</div></div>
-      <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
-    </div>
-    <div class="se-form-grid p-4">
-      <div class="se-field se-span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
-      <div class="se-field se-span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
-      <div class="se-field se-span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
-      <div class="se-field se-span-4"><label>Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
-      <div class="se-field se-span-4"><label>Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
-      <div class="se-field se-span-4"><label>Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
-      <div class="se-field se-span-4"><label>Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
-      <div class="se-field se-span-4"><label>Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
-      <div class="se-field se-span-4"><label>Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
-      <div class="se-field se-span-6"><label>Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
-      <div class="se-field se-span-6"><label>Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
-    </div>
-  </section>
-  <div class="flex justify-end gap-2">
-    <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost">CANCEL</a>
-    <button class="btn btn-primary" type="submit"><span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE & REVALIDATE</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-  </div>
-</form>
+<div class="grid gap-4 xl:grid-cols-[minmax(0,2.2fr)_minmax(320px,.8fr)]">
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">{{ endorsement.reference }}</div><div class="se-panel-title mt-1">ITEM #{{ item.pk }} / REVIEW & CORRECT</div></div>
+        <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
+      </div>
 
-<section class="se-panel mt-4">
-  <div class="se-panel-head"><div><div class="se-eyebrow">Audit source</div><div class="se-panel-title mt-1">ORIGINAL EXTRACTION JSON</div></div></div>
-  <div class="p-4"><pre class="se-json">{{ item.extracted_data }}</pre></div>
-</section>
+      {% if ocr_source %}
+      <div class="border-b border-success/30 bg-success/5 px-4 py-3 text-xs">
+        <i class="bi bi-stars mr-1 text-success"></i>
+        Values extracted from <strong>{{ ocr_source }}</strong> are shown below for review. Nothing is saved until you click <strong>Save & revalidate</strong>.
+      </div>
+      {% endif %}
+
+      <div class="se-form-grid p-4">
+        <div class="se-field se-span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
+        <div class="se-field se-span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
+        <div class="se-field se-span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
+        <div class="se-field se-span-4"><label>Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
+        <div class="se-field se-span-4"><label>Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}<span class="helptext">Choose Employee, Spouse or Child.</span></div>
+        <div class="se-field se-span-4"><label>Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
+        <div class="se-field se-span-4"><label>Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
+        <div class="se-field se-span-4"><label>Policy plan</label>{{ form.plan }}{{ form.plan.errors }}<span class="helptext">Only active plans configured for {{ endorsement.policy.policy_number }} are available.</span></div>
+        <div class="se-field se-span-4">
+          <label>Sum assured</label>
+          {{ form.sum_assured }}{{ form.sum_assured.errors }}
+          <span class="helptext">Read-only. Automatically loaded from the selected policy plan.</span>
+        </div>
+        <div class="se-field se-span-4"><label>Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
+      </div>
+    </section>
+
+    <div class="flex flex-wrap justify-end gap-2">
+      <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost">CANCEL</a>
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE & REVALIDATE</span>
+        <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+      </button>
+    </div>
+  </form>
+
+  <div class="space-y-4">
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">Image / PDF extraction</div><div class="se-panel-title mt-1">FILL FORM USING OCR</div></div>
+        <i class="bi bi-file-earmark-image text-primary"></i>
+      </div>
+      <form method="post" enctype="multipart/form-data" class="p-4">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="ocr_fill">
+        <div class="se-dropzone min-h-[12rem]">
+          {{ ocr_form.ocr_file }}
+          <div class="w-full text-center">
+            <div class="se-dropzone-icon"><i class="bi bi-stars"></i></div>
+            <strong class="font-mono text-xs tracking-wider">DROP IMAGE OR PDF</strong>
+            <div class="mt-2 text-[10px] leading-4 opacity-55">SmartEndorse extracts member details into the correction form. Review the values before saving.</div>
+            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">CHOOSE FILE</button>
+            <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No file selected</div>
+          </div>
+          <div class="se-file-list w-full"></div>
+        </div>
+        {{ ocr_form.ocr_file.errors }}
+        <button class="btn btn-primary btn-sm mt-3 w-full" type="submit">
+          <span class="btn-label"><i class="bi bi-magic"></i>EXTRACT & FILL FORM</span>
+          <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+        </button>
+      </form>
+    </section>
+
+    <section class="se-panel">
+      <div class="se-panel-head"><div><div class="se-eyebrow">Source evidence</div><div class="se-panel-title mt-1">ORIGINAL EXTRACTION JSON</div></div></div>
+      <div class="p-4"><pre class="se-json">{{ item.extracted_data }}</pre></div>
+    </section>
+  </div>
+</div>
 {% endblock %}
