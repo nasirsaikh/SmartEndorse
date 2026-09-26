@@ -1340,12 +1340,46 @@ class WorkflowService:
             cls.transition(request_obj, EndorsementRequest.Status.PENDING_INSURER_APPROVAL, actor, "Existing member record(s) require insurance company approval before processing.")
             return request_obj
 
-        request_obj.stp_eligible = bool(cfg.auto_stp_enabled and request_obj.policy.auto_stp)
+        metadata = request_obj.metadata or {}
+        risk_flags = metadata.get("risk_flags") or []
+        fraud_flag = bool(metadata.get("fraud_flag") or metadata.get("suspected_fraud"))
+        request_obj.stp_eligible = bool(
+            cfg.auto_stp_enabled
+            and request_obj.policy.auto_stp
+            and not fraud_flag
+            and not risk_flags
+        )
         request_obj.save(update_fields=["stp_eligible", "updated_at"])
         cls.transition(request_obj, EndorsementRequest.Status.SUBMITTED, actor, "Request passed validation and pricing.")
-        if not request_obj.stp_eligible:
-            return request_obj
-        return cls._auto_dispatch(request_obj)
+        if request_obj.stp_eligible:
+            return cls._auto_dispatch(request_obj)
+
+        reason_parts = []
+        if not cfg.auto_stp_enabled:
+            reason_parts.append("Platform straight-through processing is disabled.")
+        if not request_obj.policy.auto_stp:
+            reason_parts.append("Policy auto-approval is disabled.")
+        if fraud_flag:
+            reason_parts.append("Fraud/risk flag requires human review.")
+        if risk_flags:
+            reason_parts.append("Risk flags: " + ", ".join(str(flag) for flag in risk_flags))
+        reason = " ".join(reason_parts) or "Straight-through approval rules were not met."
+        approval = EndorsementApproval.objects.create(
+            request=request_obj,
+            approval_type=EndorsementApproval.ApprovalType.INSURER_REVIEW,
+            assigned_organization=request_obj.policy.insurer,
+            requested_by=actor,
+            reason=reason,
+        )
+        NotificationService.approval_requested(approval)
+        cls.transition(
+            request_obj,
+            EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+            actor,
+            "Auto-approval rules were not met. Insurance company review is required.",
+            {"reason": reason},
+        )
+        return request_obj
 
     @classmethod
     def _auto_dispatch(cls, request_obj):
@@ -1428,32 +1462,48 @@ class WorkflowService:
             description=f"{approval.get_approval_type_display()} {approval.get_status_display().lower()}.",
             payload=json_safe({"approval_id": approval.pk, "type": approval.approval_type, "decision": approval.status, "comment": comment}),
         )
+
         if not approve:
             if approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE and approval.item_id:
                 approval.item.tpa_premium_amount = approval.old_amount
                 approval.item.save(update_fields=["tpa_premium_amount", "updated_at"])
                 cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA amount change rejected; system-calculated amount restored.")
             else:
-                cls.transition(request_obj, EndorsementRequest.Status.REJECTED, actor, f"Insurance review rejected the request. Correction required: {comment}")
+                cls.transition(
+                    request_obj,
+                    EndorsementRequest.Status.REJECTED,
+                    actor,
+                    f"Insurance review rejected the request. Correction required: {comment}",
+                    {"rejection_reason": comment, "approval_type": approval.approval_type},
+                )
             return request_obj
 
         if request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING).exists():
             return request_obj
+
+        if approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE:
+            cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "Changed TPA amount approved. TPA may continue processing.")
+            return request_obj
+
         if approval.approval_type == EndorsementApproval.ApprovalType.EXISTING_MEMBER:
             for item in request_obj.items.filter(requires_insurer_approval=True):
                 item.validation_status = EndorsementItem.ValidationStatus.VALID
                 item.save(update_fields=["validation_status", "updated_at"])
-            cls.transition(request_obj, EndorsementRequest.Status.SUBMITTED, actor, "Existing-member exception approved by insurer; request released for downstream processing.")
-            try:
-                endpoint = DispatchService.dispatch(request_obj)
-                target = EndorsementRequest.Status.SENT_TO_TPA if request_obj.policy.product == Policy.Product.GROUP_MEDICAL else EndorsementRequest.Status.CORE_DISPATCHED
-                cls.transition(request_obj, target, actor, f"Approved exception dispatched through {endpoint.get_transport_display()}.")
-            except Exception as exc:
-                request_obj.validation_errors = [*request_obj.validation_errors, f"Dispatch after approval failed: {exc}"]
-                request_obj.save(update_fields=["validation_errors", "updated_at"])
-                cls.transition(request_obj, EndorsementRequest.Status.FAILED, actor, "Dispatch after approval failed.", {"error": str(exc)})
-            return request_obj
-        cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "Changed TPA amount approved. TPA may continue processing.")
+
+        cls.transition(
+            request_obj,
+            EndorsementRequest.Status.AUTO_APPROVED,
+            actor,
+            "Insurance company review approved the endorsement for downstream processing.",
+        )
+        try:
+            endpoint = DispatchService.dispatch(request_obj)
+            target = EndorsementRequest.Status.SENT_TO_TPA if request_obj.policy.product == Policy.Product.GROUP_MEDICAL else EndorsementRequest.Status.CORE_DISPATCHED
+            cls.transition(request_obj, target, actor, f"Approved request dispatched through {endpoint.get_transport_display()}.")
+        except Exception as exc:
+            request_obj.validation_errors = [*request_obj.validation_errors, f"Dispatch after approval failed: {exc}"]
+            request_obj.save(update_fields=["validation_errors", "updated_at"])
+            cls.transition(request_obj, EndorsementRequest.Status.FAILED, actor, "Dispatch after approval failed.", {"error": str(exc)})
         return request_obj
 
     @classmethod
