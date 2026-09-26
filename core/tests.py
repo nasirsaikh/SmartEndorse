@@ -108,6 +108,35 @@ class IntakeNormalizationTests(BaseInsuranceTest):
         self.assertEqual(normalized["effective_date"], "2026-09-13")
         self.assertIsNone(normalized["relationship"])
 
+    @patch("core.services.AIService")
+    def test_structured_ai_mapping_cannot_null_deterministically_mapped_fields(self, ai_service):
+        raw = {
+            "Member No": "M-100",
+            "Full Name": "ANKIT PRAMOD SHINGARE",
+            "Date of Birth": "1992-12-26",
+            "Gender": "M",
+            "Effective Date": "2026-09-13",
+            "Unusual Plan Header": "G",
+        }
+        ai = ai_service.return_value
+        ai.available = True
+        ai.normalize_structured_rows.return_value = [{
+            "_source_raw": raw,
+            "member_no": "M-100",
+            "full_name": None,
+            "date_of_birth": None,
+            "gender": None,
+            "effective_date": None,
+            "plan_code": "G",
+        }]
+        rows, ai_used = FileIntakeService._normalize_structured([raw])
+        self.assertTrue(ai_used)
+        self.assertEqual(rows[0]["full_name"], "ANKIT PRAMOD SHINGARE")
+        self.assertEqual(rows[0]["date_of_birth"], "1992-12-26")
+        self.assertEqual(rows[0]["gender"], "Male")
+        self.assertEqual(rows[0]["effective_date"], "2026-09-13")
+        self.assertEqual(rows[0]["plan_code"], "G")
+
     def test_plan_can_match_configured_plan_name_as_well_as_code(self):
         req = EndorsementRequest.objects.create(
             policy=self.policy,
