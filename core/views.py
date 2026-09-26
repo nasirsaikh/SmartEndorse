@@ -267,9 +267,34 @@ def create_request(request):
             endorsement.save()
             if form.has_manual_item():
                 EndorsementItem.objects.create(request=endorsement, **form.manual_item_payload())
+
+            created_attachments = []
             for upload in form.cleaned_data.get("attachments", []):
-                attachment = Attachment.objects.create(request=endorsement, file=upload, original_name=upload.name, kind=FileIntakeService.kind_for_name(upload.name))
+                created_attachments.append(Attachment.objects.create(
+                    request=endorsement,
+                    file=upload,
+                    original_name=upload.name,
+                    kind=FileIntakeService.kind_for_name(upload.name),
+                ))
+
+            evidence_attachments = [
+                attachment for attachment in created_attachments
+                if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+            ]
+            structured_attachments = [
+                attachment for attachment in created_attachments
+                if attachment not in evidence_attachments
+            ]
+
+            for attachment in structured_attachments:
                 FileIntakeService.process(attachment)
+
+            if evidence_attachments:
+                try:
+                    FileIntakeService.process_initial_evidence_bundle(evidence_attachments)
+                except Exception:
+                    logger.exception("Initial evidence bundle failed for endorsement %s", endorsement.pk)
+
             WorkflowEvent.objects.create(request=endorsement, actor=request.user, event_type="REQUEST_CREATED", description="Endorsement request created.")
             WorkflowService.submit(endorsement, request.user)
             if endorsement.status == EndorsementRequest.Status.NEEDS_INFO:
