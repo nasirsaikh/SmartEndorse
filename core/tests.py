@@ -8,8 +8,9 @@ from django.utils import timezone
 from unittest.mock import patch
 
 from .access import accessible_policies, can_decide_approval
+from .ai import AIService
 from .models import (
-    Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
+    AIExtractionProfile, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
     PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
 from .forms import EndorsementItemCorrectionForm
@@ -54,6 +55,9 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         self.assertIn("@tailwindcss/browser@4", html)
         self.assertIn("ENDORSEMENT CONTROL", html)
         self.assertIn("Global search: request, policy, client, member, Civil ID", html)
+        self.assertNotIn("System status", html)
+        self.assertNotIn("All services nominal", html)
+        self.assertNotIn("tom-select", html.lower())
         self.assertIn('id="theme-toggle"', html)
         self.assertIn('id="portal-drawer"', html)
         self.assertNotIn("lg:drawer-open", html)
@@ -90,7 +94,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    def test_pipeline_page_has_dashboard_kpis_and_searchable_filters(self):
+    def test_pipeline_page_has_dashboard_kpis_and_native_filters(self):
         self.grant_client_access()
         EndorsementRequest.objects.create(
             policy=self.policy,
@@ -107,7 +111,9 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertContains(response, "SEARCH & SEGMENT REQUESTS")
         self.assertContains(response, "Needs info")
         self.assertContains(response, "Pending approval")
-        self.assertContains(response, "searchable-select")
+        self.assertNotContains(response, "searchable-select")
+        self.assertContains(response, 'name="status"')
+        self.assertContains(response, 'name="product"')
         self.assertContains(response, 'name="type"')
 
     def test_item_correction_uses_policy_dropdowns_and_plan_sum_assured(self):
@@ -285,6 +291,70 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertContains(response, "ADD OR UPDATE MEMBER DATA")
         self.assertNotContains(response, "BULK CORRECTION")
         self.assertContains(response, "APPLY & REVALIDATE")
+
+
+class AIExtractionTrainingTests(BaseInsuranceTest):
+    def test_product_specific_training_profile_overrides_global_profile(self):
+        global_profile = AIExtractionProfile.objects.create(
+            name="Test Global OCR",
+            task=AIExtractionProfile.Task.DOCUMENT_EXTRACTION,
+            product="",
+            system_prompt="GLOBAL SYSTEM",
+            instructions="GLOBAL INSTRUCTIONS",
+            priority=500,
+            is_active=True,
+        )
+        product_profile = AIExtractionProfile.objects.create(
+            name="Test Medical OCR",
+            task=AIExtractionProfile.Task.DOCUMENT_EXTRACTION,
+            product=Policy.Product.GROUP_MEDICAL,
+            system_prompt="MEDICAL SYSTEM",
+            instructions="MEDICAL INSTRUCTIONS",
+            field_aliases={"national_id": ["Civil ID"]},
+            priority=600,
+            is_active=True,
+        )
+        AITrainingExample.objects.create(
+            profile=product_profile,
+            name="Civil ID example",
+            input_text="Civil ID: 12345678",
+            expected_output=[{"national_id": "12345678"}],
+            sort_order=1,
+            is_active=True,
+        )
+
+        ai = AIService(
+            product=Policy.Product.GROUP_MEDICAL,
+            context={"policy_number": self.policy.policy_number, "valid_plans": [{"code": "G", "name": "Gold"}]},
+        )
+        system, prompt = ai._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+
+        self.assertEqual(system, "MEDICAL SYSTEM")
+        self.assertIn("MEDICAL INSTRUCTIONS", prompt)
+        self.assertIn("Civil ID example", prompt)
+        self.assertIn("12345678", prompt)
+        self.assertIn('"code": "G"', prompt)
+        self.assertEqual(ai.last_profile, product_profile)
+        self.assertNotEqual(ai.last_profile, global_profile)
+
+    def test_json_parser_accepts_prefaced_array(self):
+        content = 'Here is the result: [{"full_name":"Aisha"}]'
+        parsed = AIService._parse_json_array(content)
+        self.assertEqual(parsed[0]["full_name"], "Aisha")
+
+    def test_seeded_admin_training_profiles_exist(self):
+        self.assertTrue(
+            AIExtractionProfile.objects.filter(
+                task=AIExtractionProfile.Task.DOCUMENT_EXTRACTION,
+                is_active=True,
+            ).exists()
+        )
+        self.assertTrue(
+            AIExtractionProfile.objects.filter(
+                task=AIExtractionProfile.Task.STRUCTURED_MAPPING,
+                is_active=True,
+            ).exists()
+        )
 
 
 class PricingEngineTests(BaseInsuranceTest):
