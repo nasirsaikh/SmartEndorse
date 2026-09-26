@@ -899,10 +899,14 @@ class ValidationService:
             else:
                 item.validation_status = EndorsementItem.ValidationStatus.VALID
             item.save(update_fields=["validation_errors", "validation_status", "is_existing_record", "requires_insurer_approval", "updated_at"])
-            errors.extend([f"Item {item.pk}: {e}" for e in item_errors])
+            member_label = item.full_name or item.member_no or item.employee_no or item.national_id or f"Item {item.pk}"
+            errors.extend([f'Member "{member_label}" (Item {item.pk}): {e}' for e in item_errors])
 
         for attachment in request_obj.attachments.exclude(processing_error=""):
-            errors.append(f"{attachment.original_name}: {attachment.processing_error}")
+            payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
+            if payload.get("usage") == "item_ocr_preview":
+                continue
+            errors.append(f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}')
 
         mandatory = policy.mandatory_documents_addition if request_obj.endorsement_type == EndorsementRequest.Type.ADDITION else policy.mandatory_documents_deletion
         if mandatory:
