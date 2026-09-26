@@ -338,59 +338,110 @@ def _get_accessible_request(user, pk):
     return get_object_or_404(accessible_endorsements(user).prefetch_related("items__plan", "attachments", "events", "queries", "approvals__assigned_organization"), pk=pk)
 
 
-def _wizard(endorsement):
-    stages = [
-        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED}),
-        ("Validated", {EndorsementRequest.Status.SUBMITTED, EndorsementRequest.Status.PENDING_INSURER_APPROVAL}),
-        ("Approved", {EndorsementRequest.Status.AUTO_APPROVED, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}),
-        ("TPA / Core", {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.CORE_DISPATCHED}),
-        ("Completed", {EndorsementRequest.Status.COMPLETED}),
-    ]
-    index = next((i for i, (_, states) in enumerate(stages) if endorsement.status in states), 0)
-    return [{"label": label, "state": "done" if i < index else "active" if i == index else "pending"} for i, (label, _) in enumerate(stages)]
+def _workflow_stage_key(status):
+    mapping = {
+        EndorsementRequest.Status.DRAFT: "intake",
+        EndorsementRequest.Status.NEEDS_INFO: "intake",
+        EndorsementRequest.Status.REJECTED: "intake",
+        EndorsementRequest.Status.VALIDATING: "validation",
+        EndorsementRequest.Status.SUBMITTED: "validation",
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL: "approval",
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL: "approval",
+        EndorsementRequest.Status.AUTO_APPROVED: "approval",
+        EndorsementRequest.Status.SENT_TO_TPA: "processing",
+        EndorsementRequest.Status.TPA_IN_PROGRESS: "processing",
+        EndorsementRequest.Status.TPA_QUERY: "processing",
+        EndorsementRequest.Status.CORE_DISPATCHED: "processing",
+        EndorsementRequest.Status.FAILED: "processing",
+        EndorsementRequest.Status.COMPLETED: "completion",
+    }
+    return mapping.get(status)
 
 
-def _workflow_sla_rows(endorsement):
+def _workflow_steps(endorsement):
     now = timezone.now()
-    events = list(endorsement.events.filter(event_type="STATUS_CHANGE").order_by("created_at"))
     stage_defs = [
-        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED}, endorsement.policy.client_query_sla),
-        ("Validation", {EndorsementRequest.Status.VALIDATING, EndorsementRequest.Status.SUBMITTED}, endorsement.policy.insurer_sla),
-        ("Insurance approval", {EndorsementRequest.Status.PENDING_INSURER_APPROVAL, EndorsementRequest.Status.AUTO_APPROVED, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}, endorsement.policy.insurer_sla),
-        ("TPA / Core processing", {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.CORE_DISPATCHED}, endorsement.policy.tpa_sla if endorsement.policy.product == Policy.Product.GROUP_MEDICAL else endorsement.policy.insurer_sla),
-        ("Completed", {EndorsementRequest.Status.COMPLETED}, None),
+        ("intake", "Intake", endorsement.policy.client_query_sla, 24),
+        ("validation", "Validation", endorsement.policy.insurer_sla, 8),
+        ("approval", "Approval", endorsement.policy.insurer_sla, 24),
+        (
+            "processing",
+            "TPA / Core",
+            endorsement.policy.tpa_sla if endorsement.policy.product == Policy.Product.GROUP_MEDICAL else endorsement.policy.insurer_sla,
+            24,
+        ),
     ]
-    transition_times = {}
+    status_to_stage = {
+        EndorsementRequest.Status.DRAFT: "intake",
+        EndorsementRequest.Status.NEEDS_INFO: "intake",
+        EndorsementRequest.Status.REJECTED: "intake",
+        EndorsementRequest.Status.VALIDATING: "validation",
+        EndorsementRequest.Status.SUBMITTED: "validation",
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL: "approval",
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL: "approval",
+        EndorsementRequest.Status.AUTO_APPROVED: "approval",
+        EndorsementRequest.Status.SENT_TO_TPA: "processing",
+        EndorsementRequest.Status.TPA_IN_PROGRESS: "processing",
+        EndorsementRequest.Status.TPA_QUERY: "processing",
+        EndorsementRequest.Status.CORE_DISPATCHED: "processing",
+        EndorsementRequest.Status.FAILED: "processing",
+        EndorsementRequest.Status.COMPLETED: "completion",
+    }
+
+    durations = {key: 0.0 for key, _, _, _ in stage_defs}
+    visited = {"intake"}
+    events = list(endorsement.events.filter(event_type="STATUS_CHANGE").order_by("created_at"))
+    current_status = EndorsementRequest.Status.DRAFT
+    period_start = endorsement.created_at
+
     for event in events:
-        transition_times.setdefault(event.to_status, event.created_at)
-    rows = []
-    cursor = endorsement.created_at
+        from_status = event.from_status or current_status
+        from_stage = status_to_stage.get(from_status)
+        if from_stage in durations and event.created_at >= period_start:
+            durations[from_stage] += (event.created_at - period_start).total_seconds() / 3600
+            visited.add(from_stage)
+        current_status = event.to_status or current_status
+        to_stage = status_to_stage.get(current_status)
+        if to_stage:
+            visited.add(to_stage)
+        period_start = event.created_at
+
+    current_stage = _workflow_stage_key(endorsement.status)
+    terminal = endorsement.status in {
+        EndorsementRequest.Status.COMPLETED,
+        EndorsementRequest.Status.CANCELLED,
+    }
+    if not terminal and current_stage in durations:
+        durations[current_stage] += max((now - period_start).total_seconds() / 3600, 0)
+        visited.add(current_stage)
+
+    steps = []
     total_target = 0
-    for label, statuses, profile in stage_defs[:-1]:
-        entered = min([transition_times[x] for x in statuses if x in transition_times], default=(endorsement.created_at if label == "Intake" else None))
-        later = [event.created_at for event in events if entered and event.created_at > entered and event.to_status not in statuses]
-        ended = min(later) if later else (endorsement.completed_at if endorsement.completed_at else now if endorsement.status in statuses else None)
-        actual_hours = round(((ended - entered).total_seconds() / 3600), 1) if entered and ended else None
-        target_hours = profile.target_hours if profile else (24 if label == "Intake" else 8 if label == "Validation" else 24)
+    for key, label, profile, fallback in stage_defs:
+        target_hours = profile.target_hours if profile else fallback
         total_target += target_hours
-        rows.append({
+        actual_hours = round(durations[key], 1) if key in visited else None
+        steps.append({
+            "key": key,
             "label": label,
             "target_hours": target_hours,
             "actual_hours": actual_hours,
             "breached": actual_hours is not None and actual_hours > target_hours,
-            "active": endorsement.status in statuses,
+            "state": "active" if key == current_stage else "done" if key in visited else "pending",
+            "tat_label": "Step TAT",
         })
-        if entered:
-            cursor = entered
+
     total_actual = round((((endorsement.completed_at or now) - endorsement.created_at).total_seconds() / 3600), 1)
-    rows.append({
-        "label": "Total",
+    steps.append({
+        "key": "completion",
+        "label": "Completion",
         "target_hours": total_target,
         "actual_hours": total_actual,
         "breached": total_actual > total_target,
-        "active": endorsement.status != EndorsementRequest.Status.COMPLETED,
+        "state": "active" if current_stage == "completion" else "done" if endorsement.status == EndorsementRequest.Status.COMPLETED else "pending",
+        "tat_label": "Total TAT",
     })
-    return rows
+    return steps, current_stage or "intake"
 
 
 @login_required
@@ -471,12 +522,25 @@ def request_detail(request, pk):
             "after_or_filled": payload.get("after") or payload.get("filled") or "—",
         })
 
+    wizard_steps, current_step = _workflow_steps(endorsement)
+    allowed_steps = {step["key"] for step in wizard_steps}
+    selected_step = request.GET.get("step", "").strip().lower()
+    if selected_step not in allowed_steps:
+        selected_step = current_step
+    completion_tat = next(step for step in wizard_steps if step["key"] == "completion")
+    editable_intake = can_edit_request(request.user, endorsement) and endorsement.status in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
+        EndorsementRequest.Status.TPA_QUERY,
+    }
+
     return render(request, "endorsements/detail.html", {
         "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
         "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
-        "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
-        "sla_rows": _workflow_sla_rows(endorsement),
+        "item_kpis": item_kpis, "wizard_steps": wizard_steps, "approvals": approvals,
+        "current_step": current_step, "selected_step": selected_step, "completion_tat": completion_tat,
         "latest_rejection": latest_rejection,
         "latest_rejection_reason": latest_rejection_reason,
         "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
@@ -486,10 +550,8 @@ def request_detail(request, pk):
         "request_issues": request_issues,
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit_request(request.user, endorsement),
-        "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
-            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
-            EndorsementRequest.Status.REJECTED, EndorsementRequest.Status.TPA_QUERY,
-        },
+        "editable_intake": editable_intake,
+        "can_delete_items": editable_intake,
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
