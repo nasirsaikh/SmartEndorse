@@ -80,7 +80,7 @@ def can_edit_request(user, request_obj):
     if not p:
         return False
     if p.organization_id == request_obj.requester_organization_id and p.role not in {UserProfile.Role.CLIENT_VIEWER, UserProfile.Role.AUDITOR}:
-        return request_obj.status in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.TPA_QUERY}
+        return request_obj.status in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.REJECTED}
     return p.organization_id == request_obj.policy.insurer_id and p.role in INSURER_OPERATION_ROLES
 
 
