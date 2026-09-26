@@ -9,9 +9,10 @@ from unittest.mock import patch
 
 from .access import accessible_policies, can_decide_approval
 from .models import (
-    EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
+    Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
     PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
+from .forms import EndorsementItemCorrectionForm
 from .services import FileIntakeService, PricingEngine, ValidationService, WorkflowService
 
 
@@ -52,6 +53,10 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         self.assertIn("daisyui@5", html)
         self.assertIn("@tailwindcss/browser@4", html)
         self.assertIn("ENDORSEMENT CONTROL", html)
+        self.assertIn("Global search: request, policy, client, member, Civil ID", html)
+        self.assertIn('id="theme-toggle"', html)
+        self.assertIn('id="portal-drawer"', html)
+        self.assertNotIn("lg:drawer-open", html)
         self.assertNotIn("/static/admin/css/", html)
         self.assertNotIn("admin-lte", html.lower())
         self.assertNotIn("bootswatch", html.lower())
@@ -71,6 +76,215 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         self.assertIn('data-drop-input="true"', html)
         self.assertIn("BROWSE FILES", html)
         self.assertIn('multiple', html)
+
+
+class PortalValidationUXTests(BaseInsuranceTest):
+    def grant_client_access(self):
+        PolicyAccess.objects.get_or_create(
+            policy=self.policy,
+            organization=self.client,
+            defaults={"can_create": True, "can_view_premium": True, "can_view_members": True},
+        )
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_pipeline_page_has_dashboard_kpis_and_searchable_filters(self):
+        self.grant_client_access()
+        EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get("/endorsements/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "SEARCH &amp; SEGMENT REQUESTS")
+        self.assertContains(response, "Needs info")
+        self.assertContains(response, "Pending approval")
+        self.assertContains(response, "searchable-select")
+        self.assertContains(response, 'name="type"')
+
+    def test_item_correction_uses_policy_dropdowns_and_plan_sum_assured(self):
+        self.plan.sum_assured = Decimal("50000.000")
+        self.plan.save(update_fields=["sum_assured"])
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        item = EndorsementItem.objects.create(
+            request=req,
+            full_name="Member",
+            relationship="Employee",
+            gender="Female",
+            plan=self.plan,
+            effective_date=self.today,
+        )
+        form = EndorsementItemCorrectionForm(data={
+            "member_no": "",
+            "employee_no": "E1",
+            "national_id": "N1",
+            "full_name": "Member",
+            "relationship": "Spouse",
+            "date_of_birth": "1990-01-01",
+            "gender": "Female",
+            "plan": str(self.plan.pk),
+            "effective_date": self.today.isoformat(),
+        }, instance=item)
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertEqual(saved.relationship, "Spouse")
+        self.assertEqual(saved.sum_assured, Decimal("50000.000"))
+        self.assertNotIn("annual_salary", form.fields)
+        self.assertTrue(form.fields["sum_assured"].disabled)
+        self.assertEqual(
+            [value for value, _ in form.fields["relationship"].choices],
+            ["", "Employee", "Spouse", "Child"],
+        )
+        self.assertEqual(
+            [value for value, _ in form.fields["gender"].choices],
+            ["", "Male", "Female"],
+        )
+        self.assertEqual(list(form.fields["plan"].queryset), [self.plan])
+
+    def test_plan_sum_assured_endpoint_is_access_scoped(self):
+        self.grant_client_access()
+        self.plan.sum_assured = Decimal("75000.000")
+        self.plan.save(update_fields=["sum_assured"])
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get("/policy-plans/sum-assured/", {"plan": self.plan.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sum_assured"], "75000.000")
+
+    def test_validation_upload_updates_existing_and_adds_new_member(self):
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        existing = EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1",
+            full_name="Old Name",
+            relationship="Employee",
+            gender="Male",
+            effective_date=self.today,
+        )
+        attachment = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("correction.csv", b"employee_no,full_name\nE1,New Name\n"),
+            original_name="correction.csv",
+            kind=Attachment.Kind.EXCEL,
+            is_supplemental=True,
+        )
+        result = FileIntakeService._recover_items(req, [
+            {"employee_no": "E1", "full_name": "New Name", "relationship": "Spouse", "gender": "Female"},
+            {"employee_no": "E2", "full_name": "Added Member", "relationship": "Employee", "gender": "Male"},
+        ], attachment)
+        existing.refresh_from_db()
+        self.assertEqual(existing.full_name, "New Name")
+        self.assertEqual(existing.relationship, "Spouse")
+        self.assertEqual(result["updated_items"], 1)
+        self.assertEqual(result["created_items"], 1)
+        self.assertTrue(req.items.filter(employee_no="E2", full_name="Added Member").exists())
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_validation_item_can_be_deleted_only_while_needs_info(self):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        item = EndorsementItem.objects.create(request=req, full_name="Remove Me", effective_date=self.today)
+        http = Client()
+        http.force_login(self.requester)
+        response = http.post(f"/endorsements/{req.pk}/items/{item.pk}/delete/")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(EndorsementItem.objects.filter(pk=item.pk).exists())
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService._extract")
+    def test_item_ocr_fills_preview_without_saving_until_review(self, extract_mock):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        item = EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1",
+            full_name="Old Name",
+            relationship="Employee",
+            gender="Male",
+            effective_date=self.today,
+        )
+        extract_mock.return_value = (
+            [{"employee_no": "E1", "full_name": "OCR Name"}],
+            [{"employee_no": "E1", "full_name": "OCR Name", "relationship": "Spouse", "gender": "Female", "plan_code": "G"}],
+            {"method": "vision"},
+        )
+        http = Client()
+        http.force_login(self.requester)
+        upload = SimpleUploadedFile("member.jpg", b"fake-image", content_type="image/jpeg")
+        response = http.post(
+            f"/endorsements/{req.pk}/items/{item.pk}/edit/",
+            {"action": "ocr_fill", "ocr_file": upload},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "OCR Name")
+        self.assertContains(response, "Nothing is saved until you click")
+        item.refresh_from_db()
+        self.assertEqual(item.full_name, "Old Name")
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_detail_has_one_validation_recovery_dropzone(self):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        EndorsementItem.objects.create(request=req, employee_no="E1", full_name="Member", effective_date=self.today)
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(f"/endorsements/{req.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ADD OR UPDATE MEMBER DATA")
+        self.assertNotContains(response, "BULK CORRECTION")
+        self.assertContains(response, "APPLY &amp; REVALIDATE")
 
 
 class PricingEngineTests(BaseInsuranceTest):
