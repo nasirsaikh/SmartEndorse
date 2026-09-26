@@ -1,39 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Endorsements | SmartEndorse{% endblock %}
-{% block page_title %}Endorsements{% endblock %}
+{% block page_kicker %}SmartEndorse / Pipeline / Requests{% endblock %}
+{% block page_title %}ENDORSEMENT PIPELINE{% endblock %}
 {% block object_tools %}
-<ul class="portal-object-tools">
-  {% if can_create %}<li><a class="addlink" href="{% url 'endorsement_create' %}">Add endorsement</a></li>{% endif %}
-</ul>
+  {% if can_create %}<a class="btn btn-primary btn-sm" href="{% url 'endorsement_create' %}"><i class="bi bi-plus-lg"></i>NEW ENDORSEMENT</a>{% endif %}
 {% endblock %}
 {% block content %}
-<section class="module" id="changelist">
-  <h2>Endorsement pipeline</h2>
-  <form class="portal-filterbar"
+<section class="se-panel">
+  <div class="se-panel-head">
+    <div><div class="se-eyebrow">Search and filters</div><div class="se-panel-title mt-1">REQUEST MATRIX</div></div>
+    <div class="htmx-indicator"><span class="loading loading-spinner loading-xs"></span></div>
+  </div>
+
+  <form class="grid gap-3 border-b border-base-content/10 p-4 lg:grid-cols-[minmax(260px,2fr)_minmax(190px,1fr)_minmax(190px,1fr)]"
         hx-get="{% url 'endorsement_list' %}"
         hx-target="#request-table"
         hx-push-url="true"
         hx-trigger="change, keyup changed delay:350ms from:#search-q">
-    <div>
-      <label for="search-q">Search</label>
-      <input id="search-q" name="q" value="{{ q }}" placeholder="Reference, policy, client or member">
-    </div>
-    <div>
-      <label for="filter-status">Status</label>
-      <select id="filter-status" name="status" class="searchable-select">
+    <label class="form-control">
+      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Search</span></div>
+      <label class="input input-bordered flex items-center gap-2">
+        <i class="bi bi-search opacity-40"></i>
+        <input id="search-q" name="q" value="{{ q }}" class="grow" placeholder="Reference, policy, client or member">
+      </label>
+    </label>
+    <label class="form-control">
+      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Status</span></div>
+      <select id="filter-status" name="status" class="select select-bordered searchable-select w-full">
         <option value="">All statuses</option>
         {% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
-    </div>
-    <div>
-      <label for="filter-product">Product</label>
-      <select id="filter-product" name="product" class="searchable-select">
+    </label>
+    <label class="form-control">
+      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Product</span></div>
+      <select id="filter-product" name="product" class="select select-bordered searchable-select w-full">
         <option value="">All products</option>
         {% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
-    </div>
-    <div class="htmx-indicator">Loading…</div>
+    </label>
   </form>
+
   <div id="request-table">{% include "endorsements/_table.html" %}</div>
 </section>
 {% endblock %}
