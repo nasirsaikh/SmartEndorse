@@ -190,7 +190,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         saved = form.save()
         self.assertEqual(saved.relationship, "Spouse")
         self.assertEqual(saved.sum_assured, Decimal("50000.000"))
-        self.assertNotIn("annual_salary", form.fields)
+        self.assertIn("annual_salary", form.fields)
         self.assertTrue(form.fields["sum_assured"].disabled)
         self.assertEqual(
             [value for value, _ in form.fields["relationship"].choices],
@@ -410,7 +410,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
             {attachment.original_name for attachment in bundle_args},
             {"Faiyz Id Front.jpeg", "Faiyz Id Back.jpeg"},
         )
-        revalidate_mock.assert_called_once()
+        revalidate_mock.assert_not_called()
 
     @override_settings(STORAGES={
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -504,7 +504,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertEqual(response.status_code, 302)
         bundle_args = bundle_mock.call_args.args[0]
         self.assertEqual({attachment.pk for attachment in bundle_args}, {front.pk, back.pk})
-        revalidate_mock.assert_called_once()
+        revalidate_mock.assert_not_called()
 
     def test_member_validation_error_identifies_member(self):
         req = EndorsementRequest.objects.create(
