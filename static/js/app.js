@@ -255,6 +255,18 @@
     });
   }
 
+  function stabilizePlotly() {
+    if (!window.Plotly) return;
+    const resize = () => {
+      document.querySelectorAll(".plotly-graph-div").forEach(plot => {
+        try { Plotly.Plots.resize(plot); } catch (_) {}
+      });
+    };
+    requestAnimationFrame(() => requestAnimationFrame(resize));
+    setTimeout(resize, 120);
+    setTimeout(resize, 420);
+  }
+
   window.enableBrowserNotifications = async () => {
     if (!("Notification" in window)) return;
     if (Notification.permission === "default") {
@@ -285,6 +297,7 @@
     notifyNewPortalItems(root);
     updateThemeIcon();
     setTimeout(syncPlotlyTheme, 50);
+    stabilizePlotly();
   }
 
   document.addEventListener("submit", event => {
@@ -307,11 +320,27 @@
       "error"
     );
   });
-  document.addEventListener("htmx:afterSwap", event => initialize(event.detail.target || document));
+  document.addEventListener("htmx:afterSwap", event => {
+    initialize(event.detail.target || document);
+    stabilizePlotly();
+  });
+  document.addEventListener("htmx:afterSettle", () => stabilizePlotly());
+
+  document.addEventListener("click", event => {
+    if (event.target.closest("#theme-toggle")) {
+      event.preventDefault();
+      toggleTheme();
+    }
+  });
+
+  document.addEventListener("notificationsRead", () => {
+    document.getElementById("notification-badge")?.remove();
+  });
+
+  window.addEventListener("resize", () => stabilizePlotly());
 
   document.addEventListener("DOMContentLoaded", () => {
     initialize(document);
-    document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
     document.querySelectorAll(".drawer-side a").forEach(link => {
       link.addEventListener("click", () => {
         const drawer = document.getElementById("portal-drawer");
