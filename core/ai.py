@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 
-from .models import AIProviderConfig
+from .models import AIExtractionProfile, AIProviderConfig
 
 
 CANONICAL_FIELDS = [
@@ -14,39 +14,105 @@ CANONICAL_FIELDS = [
     "effective_date",
 ]
 
-EXTRACTION_PROMPT = f"""You extract group insurance endorsement data.
-Return JSON only as an array of objects. Never calculate premium or invent values.
-Map synonyms, abbreviations and differently named columns to these canonical keys when possible:
-{', '.join(CANONICAL_FIELDS)}.
-Dates must be YYYY-MM-DD. Unknown values must be null.
-Preserve every source field inside a nested object named _source_raw so no extracted information is lost.
-If one document contains multiple members, return one object per member.
-Input:\n"""
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a precise insurance data extraction engine. "
+    "Use only information supported by the supplied source. Never invent missing values. "
+    "Return strict JSON only."
+)
 
-HEADER_MAPPING_PROMPT = f"""You normalize structured group insurance endorsement rows.
-Return JSON only as an array. For every input object, map any synonymous or differently named fields to these canonical keys:
-{', '.join(CANONICAL_FIELDS)}.
-Do not calculate premium. Do not invent missing data. Dates must be YYYY-MM-DD when determinable.
-Every output object MUST include _source_raw containing the complete original input object unchanged.
-Input rows:\n"""
+DEFAULT_DOCUMENT_INSTRUCTIONS = (
+    "Extract group insurance endorsement member data from the supplied document or image. "
+    "Return one object per distinct member/dependent. Keep identifiers exactly as printed except surrounding whitespace. "
+    "Normalize dates to YYYY-MM-DD only when unambiguous. Normalize gender to Male or Female when clearly stated. "
+    "Normalize relationship to Employee, Spouse or Child only when supported by the source. "
+    "For plan_code, copy the visible plan/category/class code or name and never substitute the member name. "
+    "Unknown or unreadable values must be null."
+)
+
+DEFAULT_STRUCTURED_INSTRUCTIONS = (
+    "Normalize spreadsheet or CSV source rows into the canonical member fields. "
+    "Map synonymous headers without inventing values. Preserve the original source object in _source_raw."
+)
 
 
 class AIService:
-    def __init__(self, config=None):
+    def __init__(self, config=None, product="", context=None):
         self.config = config or AIProviderConfig.objects.filter(is_active=True).first()
+        self.product = product or ""
+        self.context = context or {}
+        self.last_profile = None
 
     @property
     def available(self):
         return bool(self.config)
 
+    @property
+    def last_profile_name(self):
+        return self.last_profile.name if self.last_profile else "Built-in default"
+
+    def _profile(self, task):
+        qs = AIExtractionProfile.objects.filter(task=task, is_active=True).prefetch_related("examples")
+        if self.product:
+            profile = qs.filter(product=self.product).order_by("-priority", "name").first()
+            if profile:
+                return profile
+        return qs.filter(product="").order_by("-priority", "name").first()
+
+    def _prompt_bundle(self, task):
+        profile = self._profile(task)
+        self.last_profile = profile
+
+        if task == AIExtractionProfile.Task.STRUCTURED_MAPPING:
+            default_instructions = DEFAULT_STRUCTURED_INSTRUCTIONS
+        else:
+            default_instructions = DEFAULT_DOCUMENT_INSTRUCTIONS
+
+        system_prompt = (profile.system_prompt.strip() if profile and profile.system_prompt.strip() else DEFAULT_SYSTEM_PROMPT)
+        instructions = (profile.instructions.strip() if profile and profile.instructions.strip() else default_instructions)
+        aliases = profile.field_aliases if profile and isinstance(profile.field_aliases, dict) else {}
+
+        sections = [
+            instructions,
+            "Canonical output keys: " + ", ".join(CANONICAL_FIELDS) + ".",
+            (
+                "Output requirements: return a JSON array only; every row must contain the canonical keys; "
+                "unknown values must be null; preserve source evidence in _source_raw; never calculate premium."
+            ),
+        ]
+
+        if self.context:
+            sections.append("Policy/workflow context:\n" + json.dumps(self.context, ensure_ascii=False, default=str))
+        if aliases:
+            sections.append("Configured field aliases/guidance:\n" + json.dumps(aliases, ensure_ascii=False, default=str))
+
+        examples = []
+        if profile:
+            for example in profile.examples.filter(is_active=True).order_by("sort_order", "id")[:8]:
+                examples.append({
+                    "name": example.name,
+                    "input": example.input_text,
+                    "expected_output": example.expected_output,
+                })
+        if examples:
+            sections.append(
+                "Few-shot training examples. Follow their mapping style but never copy values into a different document:\n"
+                + json.dumps(examples, ensure_ascii=False, default=str)
+            )
+
+        return system_prompt, "\n\n".join(sections)
+
     def extract_text_rows(self, text):
         self._require_provider()
-        return self._parse_json_array(self._chat(EXTRACTION_PROMPT + text[:60000]))
+        system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+        prompt += "\n\nDOCUMENT TEXT:\n" + text[:60000]
+        return self._parse_json_array(self._chat(prompt, system))
 
     def normalize_structured_rows(self, rows):
         self._require_provider()
+        system, prompt = self._prompt_bundle(AIExtractionProfile.Task.STRUCTURED_MAPPING)
         serializable = json.dumps(rows[:500], default=str, ensure_ascii=False)
-        return self._parse_json_array(self._chat(HEADER_MAPPING_PROMPT + serializable))
+        prompt += "\n\nSOURCE ROWS:\n" + serializable
+        return self._parse_json_array(self._chat(prompt, system))
 
     def extract_image_rows(self, path):
         path = Path(path)
@@ -55,14 +121,19 @@ class AIService:
 
     def extract_image_bytes(self, content, mime="image/png"):
         self._require_provider(vision=True)
+        system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+        prompt += "\n\nRead the attached image carefully and extract the supported member data."
         encoded = base64.b64encode(content).decode("ascii")
-        return self._parse_json_array(self._vision(EXTRACTION_PROMPT, encoded, mime))
+        return self._parse_json_array(self._vision(prompt, encoded, mime, system))
 
     def _require_provider(self, vision=False):
         if not self.config:
             raise RuntimeError("No active AI provider is configured.")
         if vision and not self.config.supports_vision:
-            raise RuntimeError(f"Active AI provider {self.config.name} is not marked as vision-capable.")
+            raise RuntimeError(
+                f"Active AI provider {self.config.name} is not marked as vision-capable. "
+                "Configure a vision model in Django Admin > AI provider configs and enable Supports vision."
+            )
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
@@ -85,32 +156,43 @@ class AIService:
             return "https://api.anthropic.com"
         raise RuntimeError("base_url is required for OpenAI-compatible providers.")
 
-    def _chat(self, prompt):
+    def _chat(self, prompt, system_prompt=""):
         cfg = self.config
         base = self._base_url()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
             url = base + "/api/chat"
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
             payload = {
-                "model": cfg.model_name, "stream": False,
-                "messages": [{"role": "user", "content": prompt}],
+                "model": cfg.model_name,
+                "stream": False,
+                "messages": messages,
                 "options": {"temperature": float(cfg.temperature)},
             }
         elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             url = base + "/v1/messages"
             payload = {
-                "model": cfg.model_name, "max_tokens": 8192,
+                "model": cfg.model_name,
+                "max_tokens": 8192,
                 "temperature": float(cfg.temperature),
                 "messages": [{"role": "user", "content": prompt}],
             }
+            if system_prompt:
+                payload["system"] = system_prompt
         else:
             url = base + "/v1/chat/completions"
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
             payload = {
-                "model": cfg.model_name, "temperature": float(cfg.temperature),
-                "messages": [
-                    {"role": "system", "content": "Return strict JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
+                "model": cfg.model_name,
+                "temperature": float(cfg.temperature),
+                "messages": messages,
             }
+
         with httpx.Client(timeout=cfg.timeout_seconds) as client:
             data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
@@ -119,30 +201,43 @@ class AIService:
             return "".join(block.get("text", "") for block in data.get("content", []))
         return data["choices"][0]["message"]["content"]
 
-    def _vision(self, prompt, encoded, mime):
+    def _vision(self, prompt, encoded, mime, system_prompt=""):
         cfg = self.config
         base = self._base_url()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
             url = base + "/api/chat"
-            payload = {"model": cfg.model_name, "stream": False, "messages": [{"role": "user", "content": prompt, "images": [encoded]}]}
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt, "images": [encoded]})
+            payload = {"model": cfg.model_name, "stream": False, "messages": messages}
         elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             url = base + "/v1/messages"
             payload = {
-                "model": cfg.model_name, "max_tokens": 8192,
+                "model": cfg.model_name,
+                "max_tokens": 8192,
                 "messages": [{"role": "user", "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mime, "data": encoded}},
                     {"type": "text", "text": prompt},
                 ]}],
             }
+            if system_prompt:
+                payload["system"] = system_prompt
         else:
             url = base + "/v1/chat/completions"
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+            ]})
             payload = {
-                "model": cfg.model_name, "temperature": float(cfg.temperature),
-                "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
-                ]}],
+                "model": cfg.model_name,
+                "temperature": float(cfg.temperature),
+                "messages": messages,
             }
+
         with httpx.Client(timeout=cfg.timeout_seconds) as client:
             data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
@@ -153,20 +248,41 @@ class AIService:
 
     @staticmethod
     def _parse_json_array(content):
+        content = (content or "").strip()
+        if not content:
+            raise ValueError("AI response was empty.")
+
         fence = "```"
-        content = content.strip()
         if content.startswith(fence + "json"):
             content = content[len(fence + "json"):].strip()
         elif content.startswith(fence):
             content = content[len(fence):].strip()
         if content.endswith(fence):
             content = content[:-len(fence)].strip()
-        data = json.loads(content)
+
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            array_start, array_end = content.find("["), content.rfind("]")
+            object_start, object_end = content.find("{"), content.rfind("}")
+            candidate = ""
+            if array_start >= 0 and array_end > array_start:
+                candidate = content[array_start:array_end + 1]
+            elif object_start >= 0 and object_end > object_start:
+                candidate = content[object_start:object_end + 1]
+            if not candidate:
+                raise ValueError("AI response did not contain valid JSON.")
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"AI response contained invalid JSON: {exc}") from exc
+
         if isinstance(data, dict):
             for key in ("items", "members", "rows", "data"):
                 if isinstance(data.get(key), list):
                     data = data[key]
                     break
+
         if not isinstance(data, list):
             raise ValueError("AI response is not a JSON array.")
         return data
