@@ -621,6 +621,7 @@ def retry_failed_evidence_bundle(request, pk):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
         messages.error(request, "Failed documents can only be retried while the endorsement is in validation/correction.")
         return redirect("endorsement_detail", pk=pk)
@@ -643,17 +644,16 @@ def retry_failed_evidence_bundle(request, pk):
         else:
             result = FileIntakeService.process_initial_evidence_bundle(failed)
 
-        WorkflowService.revalidate_after_correction(endorsement, request.user)
         messages.success(
             request,
             f"{result['processed']} failed document(s) were retried together as one evidence bundle; "
-            f"{result['rows']} member row(s) were identified.",
+            f"{result['rows']} member row(s) were identified. Review the recovered Intake rows before validating.",
         )
     except Exception as exc:
         logger.exception("Failed evidence bundle retry failed for endorsement %s", endorsement.pk)
         messages.error(request, f"Failed document bundle could not be recovered: {exc}")
 
-    return redirect("endorsement_detail", pk=pk)
+    return redirect(f"/endorsements/{pk}/?step=intake")
 
 
 @login_required
@@ -704,6 +704,7 @@ def remove_failed_attachment(request, pk, attachment_id):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
         messages.error(request, "Failed documents can only be removed while the endorsement is in validation/correction.")
         return redirect("endorsement_detail", pk=pk)
@@ -722,9 +723,8 @@ def remove_failed_attachment(request, pk, attachment_id):
         description=f"Failed document {name} removed during validation.",
         payload={"file_name": name},
     )
-    WorkflowService.revalidate_after_correction(endorsement, request.user)
-    messages.success(request, f"{name} was removed and the endorsement was revalidated.")
-    return redirect("endorsement_detail", pk=pk)
+    messages.success(request, f"{name} was removed from Intake. Validate again when the corrected intake is ready.")
+    return redirect(f"/endorsements/{pk}/?step=intake")
 
 
 @login_required
