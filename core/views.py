@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 from datetime import timedelta
 from pathlib import Path
+import json
 import logging
 
 import plotly.graph_objects as go
@@ -452,6 +453,185 @@ def _workflow_steps(endorsement):
     return steps, current_stage or "intake"
 
 
+def _change_value(field, value, plan_names=None):
+    if value in (None, ""):
+        return "—", None
+    if field == "plan":
+        if isinstance(value, dict):
+            identity = value.get("id")
+            display = value.get("display") or (plan_names or {}).get(identity) or identity
+            return str(display or "—"), str(identity) if identity is not None else str(display)
+        display = (plan_names or {}).get(value) or value
+        return str(display), str(value)
+    if isinstance(value, dict):
+        if "display" in value:
+            return str(value.get("display") or "—"), str(value.get("id") or value.get("display") or "")
+        rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        return rendered, rendered
+    if isinstance(value, (list, tuple)):
+        rendered = ", ".join(str(item) for item in value if item not in (None, "")) or "—"
+        return rendered, rendered
+    return str(value), str(value)
+
+
+def _resolution_changes(endorsement):
+    plan_names = {
+        plan.pk: f"{plan.code} · {plan.name}"
+        for plan in endorsement.policy.plans.all()
+    }
+    labels = {
+        "member_no": "Member no.",
+        "employee_no": "Employee no.",
+        "national_id": "Civil / National ID",
+        "full_name": "Full name",
+        "relationship": "Relationship",
+        "date_of_birth": "Date of birth",
+        "gender": "Gender",
+        "plan": "Plan",
+        "annual_salary": "Annual salary",
+        "sum_assured": "Sum assured",
+        "effective_date": "Effective date",
+        "card_number": "Card number",
+        "amount": "Amount",
+    }
+    rows = []
+    events = endorsement.events.filter(
+        event_type__in=[
+            "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "BULK_ITEM_RECOVERED",
+            "SOURCE_DATA_RECOVERED", "TPA_ITEM_UPDATED",
+        ]
+    ).order_by("-created_at")
+    for event in events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        before = payload.get("before") if isinstance(payload.get("before"), dict) else {}
+        after = payload.get("after") if isinstance(payload.get("after"), dict) else {}
+        filled = payload.get("filled") if isinstance(payload.get("filled"), dict) else {}
+        changed_values = after or filled
+        changes = []
+        for field, new_value in changed_values.items():
+            if field in {"item_id", "source", "matched_by"}:
+                continue
+            old_value = before.get(field)
+            old_display, old_key = _change_value(field, old_value, plan_names)
+            new_display, new_key = _change_value(field, new_value, plan_names)
+            if old_key == new_key:
+                continue
+            changes.append({
+                "field": labels.get(field, str(field).replace("_", " ").title()),
+                "before": old_display,
+                "after": new_display,
+            })
+        if not changes:
+            continue
+        rows.append({
+            "created_at": event.created_at,
+            "description": event.description or event.event_type,
+            "actor": event.actor,
+            "changes": changes,
+        })
+    return rows
+
+
+def _source_json_rows(items):
+    canonical_fields = (
+        "member_no", "employee_no", "national_id", "full_name", "relationship",
+        "date_of_birth", "gender", "plan_code", "annual_salary", "sum_assured",
+        "effective_date",
+    )
+    rows = []
+    for item in items:
+        data = item.extracted_data if isinstance(item.extracted_data, dict) else {}
+        normalized = data.get("normalized") if isinstance(data.get("normalized"), dict) else {}
+        unified = {}
+        for field in canonical_fields:
+            value = normalized.get(field)
+            if value not in (None, "", [], {}):
+                unified[field] = value
+        if not unified:
+            fallback = {
+                "member_no": item.member_no,
+                "employee_no": item.employee_no,
+                "national_id": item.national_id,
+                "full_name": item.full_name,
+                "relationship": item.relationship,
+                "date_of_birth": item.date_of_birth,
+                "gender": item.gender,
+                "plan_code": item.plan.code if item.plan_id else None,
+                "annual_salary": item.annual_salary,
+                "sum_assured": item.sum_assured,
+                "effective_date": item.effective_date,
+            }
+            unified = {key: json_safe(value) for key, value in fallback.items() if value not in (None, "")}
+        rows.append({
+            "item": item,
+            "source_attachment_id": data.get("source_attachment_id"),
+            "json": json.dumps(json_safe(unified), indent=2, ensure_ascii=False, default=str),
+        })
+    return rows
+
+
+def _helpdesk_messages(endorsement, user):
+    messages_list = []
+    processing_statuses = {
+        EndorsementRequest.Status.SENT_TO_TPA,
+        EndorsementRequest.Status.TPA_IN_PROGRESS,
+        EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+        EndorsementRequest.Status.CORE_DISPATCHED,
+        EndorsementRequest.Status.REJECTED,
+        EndorsementRequest.Status.COMPLETED,
+    }
+    for event in endorsement.events.filter(event_type="STATUS_CHANGE").select_related("actor"):
+        if event.to_status not in processing_statuses and event.from_status not in processing_statuses:
+            continue
+        messages_list.append({
+            "kind": "system",
+            "created_at": event.created_at,
+            "text": event.description or f"{event.from_status or '—'} → {event.to_status or '—'}",
+            "status": event.to_status,
+        })
+
+    for query in endorsement.queries.all():
+        raised_by = query.raised_by
+        try:
+            raised_org = raised_by.profile.organization.name
+        except Exception:
+            raised_org = ""
+        messages_list.append({
+            "kind": "chat",
+            "created_at": query.created_at,
+            "sender": raised_by.get_full_name() or raised_by.username,
+            "organization": raised_org,
+            "subject": query.subject,
+            "text": query.message,
+            "side": "end" if query.raised_by_id == user.id else "start",
+            "query": query,
+            "can_reply": (
+                not query.is_closed
+                and hasattr(user, "profile")
+                and user.profile.organization_id == query.assigned_organization_id
+            ),
+        })
+        if query.response:
+            responded_by = query.responded_by
+            try:
+                response_org = responded_by.profile.organization.name if responded_by else query.assigned_organization.name
+            except Exception:
+                response_org = query.assigned_organization.name
+            messages_list.append({
+                "kind": "chat",
+                "created_at": query.responded_at or query.updated_at,
+                "sender": (responded_by.get_full_name() or responded_by.username) if responded_by else query.assigned_organization.name,
+                "organization": response_org,
+                "subject": f"RE: {query.subject}",
+                "text": query.response,
+                "side": "end" if responded_by and responded_by.id == user.id else "start",
+                "query": None,
+                "can_reply": False,
+            })
+    return sorted(messages_list, key=lambda row: row["created_at"])
+
+
 @login_required
 def request_detail(request, pk):
     endorsement = _get_accessible_request(request.user, pk)
@@ -485,11 +665,7 @@ def request_detail(request, pk):
     for item in items:
         member_label = item.full_name or item.member_no or item.employee_no or item.national_id or f"Item {item.pk}"
         for error in item.validation_errors or []:
-            member_issues.append({
-                "item": item,
-                "member_label": member_label,
-                "error": error,
-            })
+            member_issues.append({"item": item, "member_label": member_label, "error": error})
             known_validation_errors.add(f'Item {item.pk}: {error}')
             known_validation_errors.add(f'Member "{member_label}" (Item {item.pk}): {error}')
 
@@ -506,35 +682,21 @@ def request_detail(request, pk):
             "blocking": not optional_ocr,
         })
         known_validation_errors.add(f"{attachment.original_name}: {attachment.processing_error}")
-        known_validation_errors.add(
-            f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}'
-        )
+        known_validation_errors.add(f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}')
 
     request_issues = [
         error for error in (endorsement.validation_errors or [])
         if error not in known_validation_errors
     ]
 
-    resolution_rows = []
-    for event in endorsement.events.filter(
-        event_type__in=[
-            "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED",
-            "BULK_ITEM_RECOVERED", "VALIDATION_ROW_CREATED", "VALIDATION_ITEM_DELETED",
-        ]
-    ):
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        resolution_rows.append({
-            "created_at": event.created_at,
-            "description": event.description or event.event_type,
-            "before_or_source": payload.get("before") or payload.get("source") or "—",
-            "after_or_filled": payload.get("after") or payload.get("filled") or "—",
-        })
-
     wizard_steps, current_step = _workflow_steps(endorsement)
     allowed_steps = {step["key"] for step in wizard_steps}
     selected_step = request.GET.get("step", "").strip().lower()
     if selected_step not in allowed_steps:
         selected_step = current_step
+    selected_index = next(index for index, step in enumerate(wizard_steps) if step["key"] == selected_step)
+    previous_step = wizard_steps[selected_index - 1] if selected_index > 0 else None
+    next_step = wizard_steps[selected_index + 1] if selected_index < len(wizard_steps) - 1 else None
     completion_tat = next(step for step in wizard_steps if step["key"] == "completion")
     editable_intake = can_edit_request(request.user, endorsement) and endorsement.status in {
         EndorsementRequest.Status.DRAFT,
@@ -542,6 +704,16 @@ def request_detail(request, pk):
         EndorsementRequest.Status.REJECTED,
         EndorsementRequest.Status.TPA_QUERY,
     }
+    tpa_ready = bool(items) and all(
+        item.card_number and item.tpa_effective_date and item.tpa_premium_amount is not None
+        for item in items
+    )
+    pending_amount_approval = any(
+        approval.status == EndorsementApproval.Status.PENDING
+        and approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE
+        for approval in approvals
+    )
+    has_open_query = endorsement.queries.filter(is_closed=False).exists()
 
     return render(request, "endorsements/detail.html", {
         "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
@@ -549,12 +721,15 @@ def request_detail(request, pk):
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": wizard_steps, "approvals": approvals,
         "current_step": current_step, "selected_step": selected_step, "completion_tat": completion_tat,
-        "latest_rejection": latest_rejection,
-        "latest_rejection_reason": latest_rejection_reason,
+        "previous_step": previous_step, "next_step": next_step, "selected_step_number": selected_index + 1,
+        "latest_rejection": latest_rejection, "latest_rejection_reason": latest_rejection_reason,
         "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
-        "resolution_rows": resolution_rows,
-        "member_issues": member_issues,
-        "document_issues": document_issues,
+        "resolution_rows": _resolution_changes(endorsement),
+        "source_json_rows": _source_json_rows(items),
+        "helpdesk_messages": _helpdesk_messages(endorsement, request.user),
+        "tpa_ready": tpa_ready, "pending_amount_approval": pending_amount_approval,
+        "has_open_query": has_open_query,
+        "member_issues": member_issues, "document_issues": document_issues,
         "request_issues": request_issues,
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit_request(request.user, endorsement),
@@ -563,7 +738,6 @@ def request_detail(request, pk):
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
-
 
 @login_required
 def retry_failed_evidence_bundle(request, pk):
