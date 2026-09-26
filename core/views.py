@@ -216,8 +216,13 @@ def bulk_recovery(request, pk):
     if not can_edit_request(request.user, endorsement):
         messages.error(request, "You do not have permission to correct this endorsement.")
         return redirect("endorsement_detail", pk=pk)
-    if endorsement.status not in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY}:
-        messages.warning(request, "Bulk correction is only available while this endorsement is waiting for information.")
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.warning(request, "Bulk correction is only available while this endorsement is in intake/correction.")
         return redirect("endorsement_detail", pk=pk)
 
     form = BulkRecoveryForm(request.POST, request.FILES)
@@ -239,9 +244,6 @@ def bulk_recovery(request, pk):
             uploads.append(upload)
 
         failed = [u for u in uploads if u.status == RecoveryUpload.Status.FAILED]
-        if any(u.resolved_count for u in uploads):
-            WorkflowService.revalidate_after_correction(endorsement, request.user)
-
         resolved = sum(u.resolved_count for u in uploads)
         ambiguous = sum(u.ambiguous_count for u in uploads)
         unmatched = sum(u.unmatched_count for u in uploads)
@@ -254,7 +256,8 @@ def bulk_recovery(request, pk):
             messages.success(
                 request,
                 f"Bulk correction applied only to {endorsement.reference}: {resolved} row(s) resolved; "
-                f"{ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged.",
+                f"{ambiguous} ambiguous and {unmatched} unmatched row(s) were left unchanged. "
+                "Review the changes, then use Validate & Submit.",
             )
         else:
             messages.warning(
