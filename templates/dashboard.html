@@ -48,6 +48,14 @@
   </div>
 </div>
 
+<div class="mt-4 grid gap-px bg-base-content/10 sm:grid-cols-2 xl:grid-cols-5">
+  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Avg total TAT</span><i class="bi bi-stopwatch text-info"></i></div><div class="se-kpi-value mt-3">{{ avg_total_sla_hours }}h</div><div class="se-kpi-delta">completed endorsements</div></div>
+  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Due within 24h</span><i class="bi bi-hourglass-split text-warning"></i></div><div class="se-kpi-value mt-3 {% if due_soon %}text-warning{% endif %}">{{ due_soon }}</div><div class="se-kpi-delta">active SLA deadlines</div></div>
+  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Insurer review</span><i class="bi bi-shield-check text-warning"></i></div><div class="se-kpi-value mt-3">{{ pending_insurer }}</div><div class="se-kpi-delta">manual approval queue</div></div>
+  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Rejected / correction</span><i class="bi bi-arrow-counterclockwise text-error"></i></div><div class="se-kpi-value mt-3 {% if rejected %}text-error{% endif %}">{{ rejected }}</div><div class="se-kpi-delta">awaiting resubmission</div></div>
+  <div class="se-kpi sm:col-span-2 xl:col-span-1"><div class="flex items-center justify-between"><span class="se-kpi-label">Validation quality</span><i class="bi bi-patch-check text-success"></i></div><div class="se-kpi-value mt-3">{{ avg_validation_score }}%</div><div class="se-kpi-delta">average validation score</div></div>
+</div>
+
 <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,2.2fr)_minmax(300px,.9fr)]">
   <div class="space-y-4">
     <section class="se-panel">
@@ -55,7 +63,7 @@
         <div><div class="se-eyebrow">Service matrix</div><div class="se-panel-title mt-1">PIPELINE BY STATUS</div></div>
         <div class="badge badge-ghost badge-sm font-mono text-[10px]">{{ total }} TOTAL</div>
       </div>
-      <div class="p-2 sm:p-3">{{ chart_status|safe }}</div>
+      <div class="se-chart-shell p-2 sm:p-3">{{ chart_status|safe }}</div>
     </section>
 
     <section class="se-panel">
@@ -63,7 +71,7 @@
         <div><div class="se-eyebrow">Telemetry / six months</div><div class="se-panel-title mt-1">REQUEST VELOCITY</div></div>
         <div class="join"><span class="join-item btn btn-ghost btn-xs">6M</span><span class="join-item btn btn-ghost btn-xs btn-active">LIVE</span></div>
       </div>
-      <div class="p-2 sm:p-3">{{ chart_trend|safe }}</div>
+      <div class="se-chart-shell p-2 sm:p-3">{{ chart_trend|safe }}</div>
     </section>
   </div>
 

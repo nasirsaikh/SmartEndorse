@@ -203,6 +203,7 @@
     const theme = resolveTheme(choice);
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.dataset.themePreference = choice;
+    localStorage.setItem("smartendorse-color-mode", choice);
     updateThemeIcon();
     syncPlotlyTheme();
   }
@@ -279,12 +280,45 @@
     });
   }
 
+  function resizePlotly() {
+    if (!window.Plotly) return;
+    document.querySelectorAll(".plotly-graph-div").forEach(plot => {
+      try { Plotly.Plots.resize(plot); } catch (_) {}
+    });
+  }
+
+  function syncNotificationBadge() {
+    const panel = document.getElementById("notification-panel");
+    const badge = document.getElementById("notification-badge");
+    if (!panel) return;
+    const unreadText = panel.querySelector("[data-unread-count]")?.dataset.unreadCount;
+    if (unreadText == null) return;
+    const unread = Number(unreadText) || 0;
+    if (!unread) {
+      badge?.remove();
+      return;
+    }
+    if (badge) {
+      badge.textContent = String(unread);
+      return;
+    }
+    const button = panel.closest(".dropdown")?.querySelector("button");
+    if (!button) return;
+    const next = document.createElement("span");
+    next.id = "notification-badge";
+    next.className = "badge badge-error badge-xs absolute -right-1 -top-1";
+    next.textContent = String(unread);
+    button.appendChild(next);
+  }
+
   function initialize(root = document) {
     initDropzones(root);
     initPlanSumAssured(root);
     notifyNewPortalItems(root);
     updateThemeIcon();
-    setTimeout(syncPlotlyTheme, 50);
+    syncNotificationBadge();
+    setTimeout(() => { syncPlotlyTheme(); resizePlotly(); }, 60);
+    setTimeout(resizePlotly, 250);
   }
 
   document.addEventListener("submit", event => {
@@ -308,10 +342,19 @@
     );
   });
   document.addEventListener("htmx:afterSwap", event => initialize(event.detail.target || document));
+  document.addEventListener("htmx:afterSettle", () => setTimeout(resizePlotly, 40));
+
+  document.addEventListener("click", event => {
+    if (event.target.closest("#theme-toggle")) {
+      event.preventDefault();
+      toggleTheme();
+    }
+  });
 
   document.addEventListener("DOMContentLoaded", () => {
+    const saved = localStorage.getItem("smartendorse-color-mode");
+    if (saved && ["light", "dark", "auto"].includes(saved)) applyTheme(saved);
     initialize(document);
-    document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
     document.querySelectorAll(".drawer-side a").forEach(link => {
       link.addEventListener("click", () => {
         const drawer = document.getElementById("portal-drawer");
@@ -324,3 +367,5 @@
     if ((document.documentElement.dataset.themePreference || "auto") === "auto") applyTheme("auto");
   });
 })();
+
+window.addEventListener("resize", () => { clearTimeout(window.__sePlotResize); window.__sePlotResize = setTimeout(() => { if (window.Plotly) document.querySelectorAll(".plotly-graph-div").forEach(p => { try { Plotly.Plots.resize(p); } catch (_) {} }); }, 120); });

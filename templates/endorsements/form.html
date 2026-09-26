@@ -4,6 +4,10 @@
 {% block page_title %}NEW ENDORSEMENT{% endblock %}
 {% block object_tools %}<a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO PIPELINE</a>{% endblock %}
 {% block content %}
+<div class="alert alert-info mb-4 items-start">
+  <i class="bi bi-signpost-split mt-0.5"></i>
+  <div><strong>Start with either files or manual entry</strong><div class="mt-1 text-xs opacity-65">Upload one or more source files, enter a member manually, or use both. SmartEndorse will create the intake first so you can review extracted rows, correct them, add/remove members, and only then validate and submit.</div></div>
+</div>
 <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="space-y-4">
   {% csrf_token %}
   {% if form.non_field_errors %}
@@ -24,7 +28,7 @@
 
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 02 / Source intake</div><div class="se-panel-title mt-1">AI-ASSISTED MULTI-FILE INTAKE</div></div>
+      <div><div class="se-eyebrow">Step 02A / Source option</div><div class="se-panel-title mt-1">UPLOAD FILES</div></div>
       <span class="badge badge-primary badge-outline badge-sm">XLSX · XLS · CSV · PDF · IMAGE</span>
     </div>
     <div class="p-4">
@@ -46,8 +50,8 @@
 
   <section class="se-panel">
     <div class="se-panel-head">
-      <div><div class="se-eyebrow">Step 03 / Optional entry</div><div class="se-panel-title mt-1">MANUAL MEMBER ROW</div></div>
-      <span class="badge badge-ghost badge-sm">OPTIONAL WITH FILE UPLOAD</span>
+      <div><div class="se-eyebrow">Step 02B / Manual option</div><div class="se-panel-title mt-1">ENTER MEMBER MANUALLY</div></div>
+      <span class="badge badge-ghost badge-sm">USE ALONE OR WITH FILES</span>
     </div>
     <div class="se-form-grid p-4">
       <div class="se-field se-span-6"><label for="id_full_name">Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
@@ -66,12 +70,12 @@
   <div class="se-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
     <div class="flex items-start gap-3 text-xs opacity-65">
       <i class="bi bi-lock-fill mt-0.5 text-primary"></i>
-      <span>Policy gates, duplicate checks, required fields, existing-member controls and deterministic pricing run before routing.</span>
+      <span>This screen only creates the intake. Validation, pricing and routing happen after you review the extracted/manual member rows on the next page.</span>
     </div>
     <div class="flex shrink-0 gap-2">
       <a href="{% url 'endorsement_list' %}" class="btn btn-ghost">CANCEL</a>
       <button class="btn btn-primary" type="submit">
-        <span class="btn-label"><i class="bi bi-lightning-charge"></i>VALIDATE, PRICE & SUBMIT</span>
+        <span class="btn-label"><i class="bi bi-arrow-right-circle"></i>CREATE INTAKE & REVIEW</span>
         <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
       </button>
     </div>

@@ -1,7 +1,7 @@
 from django import forms
 from django.utils import timezone
 
-from .models import EndorsementItem, EndorsementQuery, EndorsementRequest, Policy, PolicyPlan
+from .models import EndorsementItem, EndorsementQuery, EndorsementRequest, Policy, PolicyPlan, UserProfile
 from .services import platform_config
 
 
@@ -213,12 +213,14 @@ class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):
 
 class TPAItemProcessingForm(StyledFormMixin, forms.Form):
     card_number = forms.CharField(required=True, max_length=100)
+    effective_date = forms.DateField(required=True, widget=forms.DateInput(attrs={"type": "date"}))
     amount = forms.DecimalField(required=True, max_digits=14, decimal_places=3)
 
     def __init__(self, *args, item=None, **kwargs):
         super().__init__(*args, **kwargs)
         if item and not self.is_bound:
             self.initial["card_number"] = item.card_number
+            self.initial["effective_date"] = item.tpa_effective_date or item.effective_date or item.request.effective_date
             self.initial["amount"] = item.tpa_premium_amount if item.tpa_premium_amount is not None else item.premium_impact
         self.apply_bootstrap()
 
@@ -251,3 +253,38 @@ class QueryResponseForm(StyledFormMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_bootstrap()
+
+
+class UserProfileForm(StyledFormMixin, forms.ModelForm):
+    first_name = forms.CharField(required=False, max_length=150)
+    last_name = forms.CharField(required=False, max_length=150)
+    email = forms.EmailField(required=False)
+
+    class Meta:
+        model = UserProfile
+        fields = ("job_title", "phone", "photo")
+        widgets = {
+            "photo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+        if user and not self.is_bound:
+            self.initial.update({
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+            })
+        self.apply_bootstrap()
+        self.fields["photo"].widget.attrs["class"] = "file-input file-input-bordered w-full"
+
+    def save(self, commit=True):
+        profile = super().save(commit=commit)
+        if self.user:
+            self.user.first_name = self.cleaned_data.get("first_name", "")
+            self.user.last_name = self.cleaned_data.get("last_name", "")
+            self.user.email = self.cleaned_data.get("email", "")
+            if commit:
+                self.user.save(update_fields=["first_name", "last_name", "email"])
+        return profile

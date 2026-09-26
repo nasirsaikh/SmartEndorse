@@ -1,9 +1,9 @@
-<div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3">
+<div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3" data-unread-count="{{ unread_notifications }}">
   <div>
     <div class="font-mono text-xs font-bold tracking-wide">NOTIFICATIONS</div>
     <div class="mt-0.5 text-[10px] opacity-45">{{ unread_notifications }} unread</div>
   </div>
-  {% if unread_notifications %}<button class="btn btn-ghost btn-xs" hx-post="{% url 'notifications_read' %}" hx-swap="none" hx-on::after-request="htmx.trigger('#notification-panel','refresh')">MARK ALL READ</button>{% endif %}
+  {% if unread_notifications %}<button class="btn btn-ghost btn-xs" hx-post="{% url 'notifications_read' %}" hx-target="#notification-panel" hx-swap="innerHTML">MARK ALL READ</button>{% endif %}
 </div>
 <div class="max-h-[70vh] overflow-y-auto">
 {% for note in notifications %}
