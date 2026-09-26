@@ -178,23 +178,25 @@ class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):
             "effective_date": forms.DateInput(attrs={"type": "date"}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, policy=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance and self.instance.request_id:
+        if policy is None and self.instance and self.instance.request_id:
             policy = self.instance.request.policy
+        if policy:
             self.fields["plan"].queryset = PolicyPlan.objects.filter(policy=policy, is_active=True).order_by("code")
             self.fields["plan"].empty_label = "Select policy plan"
             self.fields["plan"].widget.attrs.update({
                 "data-plan-sum-assured": "true",
                 "data-plan-sum-url": "/policy-plans/sum-assured/",
             })
-
-            plan_value = self.data.get("plan") if self.is_bound else self.initial.get("plan") or self.instance.plan_id
+            plan_value = self.data.get("plan") if self.is_bound else self.initial.get("plan") or getattr(self.instance, "plan_id", None)
             try:
                 selected_plan = self.fields["plan"].queryset.filter(pk=getattr(plan_value, "pk", plan_value)).first() if plan_value else None
             except (TypeError, ValueError):
                 selected_plan = None
             self.initial["sum_assured"] = selected_plan.sum_assured if selected_plan else None
+        else:
+            self.fields["plan"].queryset = PolicyPlan.objects.none()
 
         self.fields["sum_assured"].widget.attrs.update({
             "readonly": True,
@@ -211,27 +213,53 @@ class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):
             self.save_m2m()
         return instance
 
-
 class TPAItemProcessingForm(StyledFormMixin, forms.Form):
-    card_number = forms.CharField(required=True, max_length=100)
-    amount = forms.DecimalField(required=True, max_digits=14, decimal_places=3)
+    ACTIONS = [
+        ("save", "Save"),
+        ("approve", "Approve"),
+        ("reject", "Reject"),
+        ("query", "Raise query"),
+    ]
+    card_number = forms.CharField(required=False, max_length=100)
+    effective_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    amount = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
+    action = forms.ChoiceField(choices=ACTIONS)
+    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Reason / query")
 
     def __init__(self, *args, item=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.item = item
         if item and not self.is_bound:
             self.initial["card_number"] = item.card_number
+            self.initial["effective_date"] = item.tpa_effective_date or item.effective_date or item.request.effective_date
             self.initial["amount"] = item.tpa_premium_amount if item.tpa_premium_amount is not None else item.premium_impact
+            self.initial["action"] = "save"
         self.apply_bootstrap()
 
+    def clean(self):
+        cleaned = super().clean()
+        action = cleaned.get("action")
+        if action in {"save", "approve"}:
+            for field in ("card_number", "effective_date", "amount"):
+                if cleaned.get(field) in (None, ""):
+                    self.add_error(field, "Required for TPA processing.")
+        if action in {"reject", "query"} and not (cleaned.get("comment") or "").strip():
+            self.add_error("comment", "A reason is required.")
+        return cleaned
 
 class ApprovalDecisionForm(StyledFormMixin, forms.Form):
     decision = forms.ChoiceField(choices=[("approve", "Approve"), ("reject", "Reject")])
-    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Decision reason")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_bootstrap()
 
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("decision") == "reject" and not (cleaned.get("comment") or "").strip():
+            self.add_error("comment", "Rejection reason is required so the requester can correct and resubmit.")
+        return cleaned
 
 class QueryForm(StyledFormMixin, forms.ModelForm):
     class Meta:
@@ -252,3 +280,34 @@ class QueryResponseForm(StyledFormMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_bootstrap()
+
+
+class ProfileForm(StyledFormMixin, forms.ModelForm):
+    first_name = forms.CharField(required=False, max_length=150)
+    last_name = forms.CharField(required=False, max_length=150)
+    email = forms.EmailField(required=False)
+
+    class Meta:
+        model = UserProfile
+        fields = ("job_title", "phone", "photo")
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user or getattr(kwargs.get("instance"), "user", None)
+        super().__init__(*args, **kwargs)
+        if self.user and not self.is_bound:
+            self.initial.update({
+                "first_name": self.user.first_name,
+                "last_name": self.user.last_name,
+                "email": self.user.email,
+            })
+        self.apply_bootstrap()
+
+    def save(self, commit=True):
+        profile = super().save(commit=commit)
+        if self.user:
+            self.user.first_name = self.cleaned_data.get("first_name", "")
+            self.user.last_name = self.cleaned_data.get("last_name", "")
+            self.user.email = self.cleaned_data.get("email", "")
+            if commit:
+                self.user.save(update_fields=["first_name", "last_name", "email"])
+        return profile
