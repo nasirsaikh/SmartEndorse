@@ -1,7 +1,9 @@
 import base64
 import json
+import io
 import mimetypes
 import re
+from datetime import date as dt_date
 from pathlib import Path
 
 import httpx
@@ -72,6 +74,13 @@ DEFAULT_STRUCTURED_INSTRUCTIONS = (
     "Normalize spreadsheet or CSV source rows into the canonical member fields. "
     "Map synonymous headers without inventing values. Preserve the original source object in _source_raw."
 )
+
+PASSPORT_FIELD_ALIASES = {
+    "surname": ["Surname", "Family Name", "Last Name"],
+    "given_names": ["Given Name(s)", "Given Names", "Given Name", "First Name(s)", "First Names"],
+    "passport_no": ["Passport No.", "Passport No", "Passport Number", "Document No.", "Document Number"],
+    "nationality": ["Nationality"],
+}
 
 FORM_FIELD_ALIASES = {
     "member_no": ["Member No", "Member Number", "Member ID", "Membership No", "Card No"],
@@ -289,6 +298,126 @@ class AIService:
                 return resolved
         return value
 
+    @staticmethod
+    def _mrz_date(value):
+        value = re.sub(r"[^0-9]", "", str(value or ""))[:6]
+        if len(value) != 6:
+            return None
+        try:
+            yy, mm, dd = int(value[:2]), int(value[2:4]), int(value[4:6])
+            current_yy = dt_date.today().year % 100
+            year = 2000 + yy if yy <= current_yy else 1900 + yy
+            parsed = dt_date(year, mm, dd)
+            return parsed.isoformat()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _clean_person_name(value):
+        value = str(value or "").replace("<", " ")
+        value = re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ'\- ]+", " ", value)
+        value = re.sub(r"\s+", " ", value).strip()
+        return value.title() if value else None
+
+    def _passport_fields_from_mrz(self, text):
+        lines = []
+        for raw in str(text or "").splitlines():
+            compact = re.sub(r"\s+", "", raw.upper())
+            if len(compact) >= 30 and "<" in compact:
+                lines.append(compact)
+
+        mrz1 = next((line for line in lines if line.startswith("P<") and len(line) >= 30), None)
+        mrz2 = None
+        if mrz1:
+            idx = lines.index(mrz1)
+            if idx + 1 < len(lines):
+                mrz2 = lines[idx + 1]
+
+        if not mrz1:
+            match = re.search(r"(P<[A-Z0-9<]{28,})", str(text or "").upper().replace(" ", ""))
+            mrz1 = match.group(1) if match else None
+        if mrz1 and not mrz2:
+            source = str(text or "").upper()
+            first_pos = source.find("P<")
+            tail = source[first_pos:].splitlines() if first_pos >= 0 else []
+            compact_tail = [re.sub(r"\s+", "", line) for line in tail if line.strip()]
+            if len(compact_tail) >= 2:
+                mrz2 = compact_tail[1]
+
+        result = {}
+        if mrz1:
+            name_part = mrz1[5:] if len(mrz1) > 5 else ""
+            if "<<" in name_part:
+                surname_raw, given_raw = name_part.split("<<", 1)
+                surname = self._clean_person_name(surname_raw)
+                given = self._clean_person_name(given_raw)
+                if surname:
+                    result["surname"] = surname
+                if given:
+                    result["given_names"] = given
+                if surname or given:
+                    result["full_name"] = " ".join(part for part in (given, surname) if part).strip()
+
+        if mrz2:
+            mrz2 = re.sub(r"\s+", "", mrz2)
+            if len(mrz2) >= 28:
+                passport_no = mrz2[:9].replace("<", "").strip()
+                nationality = mrz2[10:13].replace("<", "").strip()
+                dob = self._mrz_date(mrz2[13:19])
+                sex = mrz2[20:21].replace("<", "").strip()
+                if passport_no:
+                    result["passport_no"] = passport_no
+                if nationality:
+                    result["nationality"] = nationality
+                if dob:
+                    result["date_of_birth"] = dob
+                if sex in {"M", "F"}:
+                    result["gender"] = "Male" if sex == "M" else "Female"
+
+        return result
+
+    def _passport_fields_from_labels(self, text):
+        all_aliases = [
+            alias
+            for aliases in [*PASSPORT_FIELD_ALIASES.values(), *self._form_aliases().values()]
+            for alias in aliases
+        ]
+        result = {}
+        for field, aliases in PASSPORT_FIELD_ALIASES.items():
+            value = self._find_labeled_value(text, aliases, all_aliases)
+            if not value:
+                for alias in aliases:
+                    match = re.search(
+                        rf"(?im)^\s*{re.escape(alias)}\s+([^\n|]{{2,80}})$",
+                        str(text or ""),
+                    )
+                    if match:
+                        value = self._clean_ocr_value(match.group(1))
+                        break
+            if value:
+                result[field] = value
+
+        surname = self._clean_person_name(result.get("surname"))
+        given_names = self._clean_person_name(result.get("given_names"))
+        if surname or given_names:
+            result["full_name"] = " ".join(
+                part for part in (given_names, surname) if part
+            ).strip()
+        return result
+
+    @staticmethod
+    def _rotate_image_bytes(content, degrees):
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(content))
+            rotated = image.rotate(degrees, expand=True)
+            output = io.BytesIO()
+            fmt = "PNG" if (image.format or "").upper() not in {"JPEG", "JPG", "WEBP"} else image.format
+            rotated.save(output, format=fmt or "PNG")
+            return output.getvalue(), ("image/png" if (fmt or "PNG").upper() == "PNG" else f"image/{str(fmt).lower()}")
+        except Exception:
+            return None, None
+
     def extract_form_fields_from_text(self, text):
         text = str(text or "").strip()
         if not text:
@@ -301,10 +430,23 @@ class AIService:
         for field, field_aliases in aliases.items():
             row[field] = self._find_labeled_value(text, field_aliases, all_aliases)
 
+        passport = self._passport_fields_from_labels(text)
+        mrz = self._passport_fields_from_mrz(text)
+        passport = {**mrz, **{key: value for key, value in passport.items() if value not in (None, "")}}
+
+        if not row.get("full_name") and passport.get("full_name"):
+            row["full_name"] = passport["full_name"]
+        if not row.get("date_of_birth") and passport.get("date_of_birth"):
+            row["date_of_birth"] = passport["date_of_birth"]
+        if not row.get("gender") and passport.get("gender"):
+            row["gender"] = passport["gender"]
+
         row["plan_code"] = self._resolve_form_plan(row.get("plan_code"), text)
         row["_source_raw"] = {
             "ocr_text": text[:12000],
             "extraction_mode": "direct_form_fill",
+            "document_type": "passport" if passport else "member_document",
+            "passport": passport,
         }
 
         meaningful = {
@@ -314,26 +456,42 @@ class AIService:
         }
         if not meaningful:
             raise ValueError(
-                "OCR completed, but SmartEndorse could not find any recognizable member fields in the document."
+                "OCR completed, but SmartEndorse could not find recognizable member/passport fields. "
+                "The scan may be rotated or the OCR output may not contain field labels."
             )
         return row
 
     def extract_form_fields_from_image_bytes(self, content, mime="image/png"):
         self._require_provider(vision=True)
-        encoded = base64.b64encode(content).decode("ascii")
 
-        try:
+        def run_ocr(image_bytes, image_mime):
+            encoded = base64.b64encode(image_bytes).decode("ascii")
             if (
                 self.config.provider == AIProviderConfig.Provider.OLLAMA
                 and "glm-ocr" in (self.config.model_name or "").lower()
             ):
-                ocr_text = self._vision_form_text(encoded, mime)
+                ocr_text = self._vision_form_text(encoded, image_mime)
                 return self.extract_form_fields_from_text(ocr_text)
-
-            rows = self.extract_image_bytes(content, mime)
+            rows = self.extract_image_bytes(image_bytes, image_mime)
             if not rows:
                 raise ValueError("Vision model returned no member data.")
             return rows[0]
+
+        try:
+            try:
+                return run_ocr(content, mime)
+            except ValueError as first_error:
+                rotated, rotated_mime = self._rotate_image_bytes(content, -90)
+                if rotated:
+                    try:
+                        result = run_ocr(rotated, rotated_mime or mime)
+                        result.setdefault("_source_raw", {})
+                        if isinstance(result["_source_raw"], dict):
+                            result["_source_raw"]["rotation_retry"] = "90_clockwise"
+                        return result
+                    except ValueError:
+                        pass
+                raise first_error
         except RuntimeError as exc:
             if self._is_glm_ollama_repeat_error(exc):
                 fallback_config = self._select_vision_provider(
@@ -592,14 +750,17 @@ class AIService:
         url = base + "/api/chat"
         options = self._ollama_runtime_options(vision=True)
         options["num_ctx"] = min(int(options.get("num_ctx") or 4096), 4096)
-        options["num_predict"] = min(int(options.get("num_predict") or 512), 512)
+        options["num_predict"] = min(int(options.get("num_predict") or 256), 256)
         options["temperature"] = 0.0
 
         prompt = (
-            "Text Recognition: Read only the visible member information in this document. "
+            "Text Recognition: Read the visible identity/member information in this document. "
+            "The document may be an insurance member form, ID card, or passport and may be rotated. "
             "Return short plain-text labelled lines only for fields that are visible. "
-            "Use these labels when possible: Member No, Employee No, Civil ID, Full Name, "
+            "For insurance/member documents use: Member No, Employee No, Civil ID, Full Name, "
             "Relationship, Date of Birth, Gender, Plan, Effective Date. "
+            "For passports also include: Surname, Given Names, Passport No, Nationality, Date of Birth, Sex. "
+            "If an MRZ is visible, include exactly two lines labelled MRZ1 and MRZ2. "
             "Do not explain, do not summarize, do not repeat text, and do not return JSON."
         )
         payload = {
