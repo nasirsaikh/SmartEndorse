@@ -16,7 +16,7 @@
         </tr>
       </thead>
       <tbody>
-      {% for item in endorsement.items.all %}
+      {% for item in items %}
         <tr>
           <td>
             <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
@@ -45,6 +45,7 @@
             {% endif %}
           </td>
           <td class="whitespace-nowrap">
+            <button class="btn btn-ghost btn-xs" type="button" onclick="document.getElementById('source-json-{{ item.pk }}').showModal()"><i class="bi bi-braces"></i>SOURCE</button>
             {% if allow_member_edit and can_edit %}
               <a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>
               {% if can_delete_items %}
@@ -54,6 +55,20 @@
               </form>
               {% endif %}
             {% endif %}
+            <dialog id="source-json-{{ item.pk }}" class="modal">
+              <div class="modal-box max-w-3xl">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="se-eyebrow">Source data</div>
+                    <h3 class="mt-1 font-mono text-sm font-bold">{{ item.full_name|default:item.member_no|default:"Member" }}</h3>
+                  </div>
+                  <form method="dialog"><button class="btn btn-sm btn-circle btn-ghost">✕</button></form>
+                </div>
+                <pre class="se-json mt-4 max-h-[65vh]">{{ item.source_json }}</pre>
+                <div class="modal-action"><form method="dialog"><button class="btn btn-sm">CLOSE</button></form></div>
+              </div>
+              <form method="dialog" class="modal-backdrop"><button>close</button></form>
+            </dialog>
           </td>
         </tr>
         {% if show_tpa_controls and can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}

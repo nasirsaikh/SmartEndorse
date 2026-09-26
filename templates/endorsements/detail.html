@@ -9,27 +9,19 @@
 {% block content %}
 
 <section class="se-panel mb-4">
-  <div class="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+  <div class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
     <div class="min-w-0">
-      <div class="mb-2 flex flex-wrap gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="se-status se-status-{{ endorsement.status|lower }}">{{ endorsement.get_status_display }}</span>
-        {% if endorsement.stp_eligible %}<span class="se-status se-status-ok">STP eligible</span>{% endif %}
         {% if endorsement.sla_breached %}<span class="se-status se-status-error">SLA breached</span>{% endif %}
       </div>
-      <h2 class="truncate font-mono text-lg font-semibold tracking-wide">{{ endorsement.policy.policy_number }} · {{ endorsement.policy.policy_name }}</h2>
-      <div class="mt-1 text-xs opacity-55">{{ endorsement.get_endorsement_type_display }} · Effective {{ endorsement.effective_date|date:"d M Y" }} · {{ endorsement.policy.client.name }}</div>
+      <h2 class="mt-2 truncate font-mono text-lg font-semibold tracking-wide">{{ endorsement.policy.policy_number }} · {{ endorsement.policy.policy_name }}</h2>
+      <div class="mt-1 text-xs opacity-55">{{ endorsement.get_endorsement_type_display }} · {{ endorsement.effective_date|date:"d M Y" }} · {{ endorsement.policy.client.name }}</div>
     </div>
     <div class="shrink-0 lg:text-right">
-      <div class="se-eyebrow">System-calculated premium impact</div>
-      <div class="mt-1 font-mono text-2xl font-semibold">{{ endorsement.currency }} {{ endorsement.premium_impact|floatformat:3 }}</div>
+      <div class="se-eyebrow">Premium impact</div>
+      <div class="mt-1 font-mono text-xl font-semibold">{{ endorsement.currency }} {{ endorsement.premium_impact|floatformat:3 }}</div>
     </div>
-  </div>
-  <div class="grid grid-cols-2 gap-px border-t border-base-content/10 bg-base-content/10 sm:grid-cols-5">
-    <div class="bg-base-100 p-3"><div class="se-eyebrow">Total rows</div><div class="mt-1 font-mono text-xl">{{ item_kpis.total }}</div></div>
-    <div class="bg-base-100 p-3"><div class="se-eyebrow">Correct</div><div class="mt-1 font-mono text-xl text-success">{{ item_kpis.correct }}</div></div>
-    <div class="bg-base-100 p-3"><div class="se-eyebrow">Errors</div><div class="mt-1 font-mono text-xl text-error">{{ item_kpis.errors }}</div></div>
-    <div class="bg-base-100 p-3"><div class="se-eyebrow">Existing</div><div class="mt-1 font-mono text-xl text-warning">{{ item_kpis.existing }}</div></div>
-    <div class="col-span-2 bg-base-100 p-3 sm:col-span-1"><div class="se-eyebrow">Approval</div><div class="mt-1 font-mono text-xl text-info">{{ item_kpis.approval }}</div></div>
   </div>
 </section>
 
@@ -66,29 +58,14 @@
       {% endfor %}
     </div>
   </div>
-  <div class="se-workflow-footer">
-    <div><i class="bi bi-stopwatch mr-1 text-primary"></i><strong>Live SLA due:</strong> {% if endorsement.current_sla_due_at %}{{ endorsement.current_sla_due_at|date:"d M Y H:i" }}{% else %}not running{% endif %}{% if endorsement.sla_breached %}<span class="ml-2 font-bold text-error">BREACHED</span>{% endif %}</div>
-    <div><strong>Total TAT:</strong> {{ completion_tat.actual_hours }}h / {{ completion_tat.target_hours }}h target</div>
-  </div>
 </section>
 
 <section id="workflow-stage" class="scroll-mt-24">
-  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-    <div>
-      <div class="se-eyebrow">Workflow page</div>
-      <div class="mt-1 font-mono text-sm font-bold uppercase tracking-wider">
-        {% if selected_step == "intake" %}1. Intake & Correction
-        {% elif selected_step == "validation" %}2. Validation
-        {% elif selected_step == "approval" %}3. Insurance Approval
-        {% elif selected_step == "processing" %}4. TPA / Core Processing
-        {% elif selected_step == "completion" %}5. Completion
-        {% endif %}
-      </div>
-    </div>
-    {% if selected_step != current_step %}
-      <a class="btn btn-primary btn-outline btn-sm" href="?step={{ current_step }}#workflow-stage"><i class="bi bi-crosshair"></i>GO TO CURRENT STEP</a>
-    {% endif %}
+  {% if selected_step != current_step %}
+  <div class="mb-3 flex justify-end">
+    <a class="btn btn-primary btn-outline btn-xs" href="?step={{ current_step }}#workflow-stage"><i class="bi bi-crosshair"></i>GO TO CURRENT STEP</a>
   </div>
+  {% endif %}
 
   {% if selected_step == "intake" %}
     {% include "endorsements/partials/_step_intake.html" %}

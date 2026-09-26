@@ -734,8 +734,13 @@ def request_detail(request, pk):
     )
     has_open_query = endorsement.queries.filter(is_closed=False).exists()
 
+    source_json_rows = _source_json_rows(items)
+    source_json_by_item = {row["item"].pk: row["json"] for row in source_json_rows}
+    for item in items:
+        item.source_json = source_json_by_item.get(item.pk, "{}")
+
     return render(request, "endorsements/detail.html", {
-        "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
+        "endorsement": endorsement, "items": items, "query_form": QueryForm(), "response_form": QueryResponseForm(),
         "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": wizard_steps, "approvals": approvals,
@@ -744,7 +749,6 @@ def request_detail(request, pk):
         "latest_rejection": latest_rejection, "latest_rejection_reason": latest_rejection_reason,
         "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
         "resolution_rows": _resolution_changes(endorsement),
-        "source_json_rows": _source_json_rows(items),
         "helpdesk_messages": _helpdesk_messages(endorsement, request.user),
         "tpa_ready": tpa_ready, "pending_amount_approval": pending_amount_approval,
         "has_open_query": has_open_query,
