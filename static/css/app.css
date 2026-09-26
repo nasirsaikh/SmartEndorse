@@ -160,6 +160,8 @@ body{
 .se-workflow-step.is-current{background:color-mix(in srgb,var(--color-primary) 7%,var(--color-base-100))}
 .se-workflow-step.is-done .se-workflow-index{border-color:color-mix(in srgb,var(--color-success) 55%,transparent);background:color-mix(in srgb,var(--color-success) 12%,transparent);color:var(--color-success)}
 .se-workflow-step.is-current .se-workflow-index{border-color:color-mix(in srgb,var(--color-primary) 65%,transparent);background:color-mix(in srgb,var(--color-primary) 12%,transparent);color:var(--color-primary)}
+.se-workflow-step.is-returned .se-workflow-index{border-color:color-mix(in srgb,var(--color-warning) 60%,transparent);background:color-mix(in srgb,var(--color-warning) 12%,transparent);color:var(--color-warning)}
+.se-workflow-step.is-returned .se-workflow-state{color:var(--color-warning);opacity:.9}
 .se-workflow-step-top{display:flex;align-items:center;gap:.65rem}
 .se-workflow-index{
   display:grid;height:1.7rem;width:1.7rem;flex:0 0 auto;place-items:center;
