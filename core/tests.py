@@ -104,7 +104,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         http.force_login(self.requester)
         response = http.get("/endorsements/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "SEARCH &amp; SEGMENT REQUESTS")
+        self.assertContains(response, "SEARCH & SEGMENT REQUESTS")
         self.assertContains(response, "Needs info")
         self.assertContains(response, "Pending approval")
         self.assertContains(response, "searchable-select")
@@ -284,7 +284,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "ADD OR UPDATE MEMBER DATA")
         self.assertNotContains(response, "BULK CORRECTION")
-        self.assertContains(response, "APPLY &amp; REVALIDATE")
+        self.assertContains(response, "APPLY & REVALIDATE")
 
 
 class PricingEngineTests(BaseInsuranceTest):
