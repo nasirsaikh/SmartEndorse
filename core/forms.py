@@ -1,7 +1,8 @@
 from django import forms
+from django.contrib.auth.models import User
 from django.utils import timezone
 
-from .models import EndorsementItem, EndorsementQuery, EndorsementRequest, Policy, PolicyPlan
+from .models import EndorsementItem, EndorsementQuery, EndorsementRequest, Policy, PolicyPlan, UserProfile
 from .services import platform_config
 
 
