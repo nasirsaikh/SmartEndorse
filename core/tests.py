@@ -647,7 +647,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    def test_detail_has_one_validation_recovery_dropzone(self):
+    def test_detail_separates_intake_file_and_manual_correction(self):
         self.grant_client_access()
         req = EndorsementRequest.objects.create(
             policy=self.policy,
@@ -662,9 +662,10 @@ class PortalValidationUXTests(BaseInsuranceTest):
         http.force_login(self.requester)
         response = http.get(f"/endorsements/{req.pk}/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "ADD OR UPDATE MEMBER DATA")
-        self.assertNotContains(response, "BULK CORRECTION")
-        self.assertContains(response, "APPLY & REVALIDATE")
+        self.assertContains(response, "ADD FILES OR EVIDENCE")
+        self.assertContains(response, "ADD MEMBER MANUALLY")
+        self.assertContains(response, "PROCESS INTO INTAKE")
+        self.assertNotContains(response, "APPLY & REVALIDATE")
 
 
 class AIExtractionTrainingTests(BaseInsuranceTest):
