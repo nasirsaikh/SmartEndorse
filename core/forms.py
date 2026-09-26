@@ -324,3 +324,39 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             if commit:
                 self.user.save(update_fields=["first_name", "last_name", "email"])
         return profile
+
+
+class AutoApprovalRuleForm(StyledFormMixin, forms.Form):
+    auto_stp = forms.BooleanField(required=False, label="Enable automatic approval when all rules pass")
+    min_validation_score = forms.DecimalField(required=False, min_value=0, max_value=100, decimal_places=2, label="Minimum validation score %")
+    max_abs_premium_impact = forms.DecimalField(required=False, min_value=0, max_digits=14, decimal_places=3, label="Maximum absolute premium impact")
+    block_on_risk_flags = forms.BooleanField(required=False, label="Require manual review when risk / fraud flags exist")
+
+    def __init__(self, *args, policy=None, **kwargs):
+        self.policy = policy
+        super().__init__(*args, **kwargs)
+        rules = policy.auto_approval_rules if policy and isinstance(policy.auto_approval_rules, dict) else {}
+        if policy and not self.is_bound:
+            self.initial.update({
+                "auto_stp": policy.auto_stp,
+                "min_validation_score": rules.get("min_validation_score"),
+                "max_abs_premium_impact": rules.get("max_abs_premium_impact"),
+                "block_on_risk_flags": rules.get("block_on_risk_flags", True),
+            })
+        self.apply_bootstrap()
+
+    def save(self):
+        if not self.policy:
+            raise ValueError("Policy is required.")
+        rules = dict(self.policy.auto_approval_rules or {})
+        for key in ("min_validation_score", "max_abs_premium_impact"):
+            value = self.cleaned_data.get(key)
+            if value in (None, ""):
+                rules.pop(key, None)
+            else:
+                rules[key] = str(value)
+        rules["block_on_risk_flags"] = bool(self.cleaned_data.get("block_on_risk_flags"))
+        self.policy.auto_stp = bool(self.cleaned_data.get("auto_stp"))
+        self.policy.auto_approval_rules = rules
+        self.policy.save(update_fields=["auto_stp", "auto_approval_rules", "updated_at"])
+        return self.policy
