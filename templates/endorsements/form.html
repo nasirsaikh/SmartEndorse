@@ -1,82 +1,80 @@
 {% extends "base.html" %}
-{% block title %}Add endorsement | SmartEndorse{% endblock %}
-{% block page_title %}Add endorsement{% endblock %}
-{% block object_tools %}
-<ul class="portal-object-tools"><li><a href="{% url 'endorsement_list' %}">Endorsement list</a></li></ul>
-{% endblock %}
+{% block title %}New Endorsement | SmartEndorse{% endblock %}
+{% block page_kicker %}SmartEndorse / Pipeline / Create{% endblock %}
+{% block page_title %}NEW ENDORSEMENT{% endblock %}
+{% block object_tools %}<a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO PIPELINE</a>{% endblock %}
 {% block content %}
-<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="portal-form" x-data="fileDropzone()">
+<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="space-y-4">
   {% csrf_token %}
-  {% if form.non_field_errors %}<div class="error-summary">{{ form.non_field_errors }}</div>{% endif %}
+  {% if form.non_field_errors %}
+  <div class="alert alert-error"><i class="bi bi-x-octagon"></i><div>{{ form.non_field_errors }}</div></div>
+  {% endif %}
 
-  <fieldset class="module">
-    <h2>Policy and endorsement</h2>
-    <div class="portal-form-grid">
-      <div class="form-row span-6">
-        <label for="id_policy">Policy</label>
-        {{ form.policy }}{{ form.policy.errors }}
-      </div>
-      <div class="form-row span-3">
-        <label for="id_endorsement_type">Endorsement type</label>
-        {{ form.endorsement_type }}{{ form.endorsement_type.errors }}
-      </div>
-      <div class="form-row span-3">
-        <label for="id_effective_date">Effective date</label>
-        {{ form.effective_date }}{{ form.effective_date.errors }}
-      </div>
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 01 / Request control</div><div class="se-panel-title mt-1">POLICY & ENDORSEMENT</div></div>
+      <span class="badge badge-outline badge-sm">REQUIRED</span>
     </div>
-  </fieldset>
-
-  <fieldset class="module">
-    <h2>Manual member row</h2>
-    <p class="module-description">Optional when one or more source files are uploaded.</p>
-    <div class="portal-form-grid">
-      <div class="form-row span-6"><label for="id_full_name">Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
-      <div class="form-row span-3"><label for="id_member_no">Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
-      <div class="form-row span-3"><label for="id_employee_no">Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
-      <div class="form-row span-4"><label for="id_national_id">Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
-      <div class="form-row span-4"><label for="id_relationship">Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
-      <div class="form-row span-4"><label for="id_date_of_birth">Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
-      <div class="form-row span-4"><label for="id_gender">Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
-      <div class="form-row span-4"><label for="id_plan">Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
-      <div class="form-row span-4"><label for="id_annual_salary">Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
-      <div class="form-row span-6"><label for="id_sum_assured">Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
+    <div class="se-form-grid p-4">
+      <div class="se-field se-span-6"><label for="id_policy">Policy</label>{{ form.policy }}{{ form.policy.errors }}</div>
+      <div class="se-field se-span-3"><label for="id_endorsement_type">Endorsement type</label>{{ form.endorsement_type }}{{ form.endorsement_type.errors }}</div>
+      <div class="se-field se-span-3"><label for="id_effective_date">Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
     </div>
-  </fieldset>
+  </section>
 
-  <fieldset class="module">
-    <h2>Source files</h2>
-    <p class="module-description">Excel, CSV, PDF and image files are supported. SmartEndorse preserves the original extraction and maps data to canonical endorsement fields.</p>
-    <div class="module-content">
-      <div class="upload-zone"
-           :class="{'dragging': dragging}"
-           @dragover.prevent="dragging=true"
-           @dragleave.prevent="dragging=false"
-           @drop.prevent="dragging=false; addFiles($event.dataTransfer.files)"
-           @click.self="$refs.fileInput.click()">
-        <div @click="$refs.fileInput.click()">
-          <div class="upload-icon"><i class="bi bi-cloud-arrow-up"></i></div>
-          <strong>Drag files here or click to choose</strong>
-          <div class="hint">Multiple files are supported. Known headings are mapped directly; unfamiliar headings may be mapped by the configured AI provider.</div>
-        </div>
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 02 / Source intake</div><div class="se-panel-title mt-1">AI-ASSISTED MULTI-FILE INTAKE</div></div>
+      <span class="badge badge-primary badge-outline badge-sm">XLSX · XLS · CSV · PDF · IMAGE</span>
+    </div>
+    <div class="p-4">
+      <div class="se-dropzone">
         {{ form.attachments }}
-        <div class="file-list" x-show="files.length" x-cloak>
-          <template x-for="(file,index) in files" :key="file.name + file.size">
-            <div class="file-chip">
-              <div class="min-width-0"><span class="file-name" x-text="file.name"></span><small x-text="humanSize(file.size)"></small></div>
-              <button class="button button-danger" type="button" @click.stop="removeFile(index)">Remove</button>
-            </div>
-          </template>
+        <div class="w-full max-w-2xl text-center">
+          <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+          <div class="font-mono text-sm font-bold tracking-wide">DROP SOURCE FILES HERE</div>
+          <div class="mt-2 text-xs opacity-55">or choose one or more files from your computer</div>
+          <button type="button" data-browse-files class="btn btn-primary btn-sm mt-4"><i class="bi bi-folder2-open"></i>BROWSE FILES</button>
+          <div data-file-count class="mt-3 text-[10px] uppercase tracking-wider opacity-45">No files selected</div>
         </div>
-        {{ form.attachments.errors }}
+        <div class="se-file-list w-full"></div>
       </div>
-      <p class="help">Expired or near-expiry policies, empty requests, invalid rows and duplicate identifiers are blocked. Existing active members are routed for insurer approval instead of straight-through processing.</p>
+      {{ form.attachments.errors }}
+      <div class="mt-3 flex gap-2 text-xs opacity-55"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Known columns are mapped deterministically; unfamiliar headings may use the configured AI provider.</span></div>
     </div>
-  </fieldset>
+  </section>
 
-  <div class="submit-row">
-    <a class="button button-secondary" href="{% url 'endorsement_list' %}">Cancel</a>
-    <button class="button default" type="submit"><span class="btn-label">Validate, price and submit</span><span class="portal-spinner" aria-hidden="true"></span></button>
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 03 / Optional entry</div><div class="se-panel-title mt-1">MANUAL MEMBER ROW</div></div>
+      <span class="badge badge-ghost badge-sm">OPTIONAL WITH FILE UPLOAD</span>
+    </div>
+    <div class="se-form-grid p-4">
+      <div class="se-field se-span-6"><label for="id_full_name">Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
+      <div class="se-field se-span-3"><label for="id_member_no">Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
+      <div class="se-field se-span-3"><label for="id_employee_no">Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_national_id">Civil / National ID</label>{{ form.national_id }}{{ form.national_id.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_relationship">Relationship</label>{{ form.relationship }}{{ form.relationship.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_date_of_birth">Date of birth</label>{{ form.date_of_birth }}{{ form.date_of_birth.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_gender">Gender</label>{{ form.gender }}{{ form.gender.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_plan">Plan</label>{{ form.plan }}{{ form.plan.errors }}</div>
+      <div class="se-field se-span-4"><label for="id_annual_salary">Annual salary</label>{{ form.annual_salary }}{{ form.annual_salary.errors }}</div>
+      <div class="se-field se-span-6"><label for="id_sum_assured">Sum assured</label>{{ form.sum_assured }}{{ form.sum_assured.errors }}</div>
+    </div>
+  </section>
+
+  <div class="se-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div class="flex items-start gap-3 text-xs opacity-65">
+      <i class="bi bi-lock-fill mt-0.5 text-primary"></i>
+      <span>Policy gates, duplicate checks, required fields, existing-member controls and deterministic pricing run before routing.</span>
+    </div>
+    <div class="flex shrink-0 gap-2">
+      <a href="{% url 'endorsement_list' %}" class="btn btn-ghost">CANCEL</a>
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label"><i class="bi bi-lightning-charge"></i>VALIDATE, PRICE & SUBMIT</span>
+        <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+      </button>
+    </div>
   </div>
 </form>
 {% endblock %}
