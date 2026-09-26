@@ -310,7 +310,10 @@ def request_detail(request, pk):
 
     resolution_rows = []
     for event in endorsement.events.filter(
-        event_type__in=["ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED", "BULK_ITEM_RECOVERED"]
+        event_type__in=[
+            "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED",
+            "BULK_ITEM_RECOVERED", "VALIDATION_ROW_CREATED", "VALIDATION_ITEM_DELETED",
+        ]
     ):
         payload = event.payload if isinstance(event.payload, dict) else {}
         resolution_rows.append({
@@ -327,6 +330,9 @@ def request_detail(request, pk):
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
         "resolution_rows": resolution_rows,
         "can_edit": can_edit_request(request.user, endorsement),
+        "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
+            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+        },
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
@@ -515,10 +521,6 @@ def supplemental_upload(request, pk):
 
         if processed:
             WorkflowService.revalidate_after_correction(endorsement, request.user)
-
-        created = sum((a.extracted_payload or {}).get("created_items", 0) for a in endorsement.attachments.filter(pk__in=[
-            a.pk for a in endorsement.attachments.order_by("-pk")[:processed]
-        ])) if processed else 0
 
         if failures:
             text = "; ".join(failures)
