@@ -1,0 +1,28 @@
+<nav class="se-panel mt-4 flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Workflow step navigation">
+  <div>
+    {% if previous_step %}
+    <a class="btn btn-outline btn-sm" href="?step={{ previous_step.key }}#workflow-stage">
+      <i class="bi bi-arrow-left"></i>
+      <span><span class="block text-[9px] font-normal opacity-50">PREVIOUS</span>{{ previous_step.label }}</span>
+    </a>
+    {% else %}
+    <button class="btn btn-outline btn-sm" disabled><i class="bi bi-arrow-left"></i>PREVIOUS</button>
+    {% endif %}
+  </div>
+
+  <div class="text-center">
+    <div class="se-eyebrow">Workflow navigation</div>
+    <div class="mt-1 font-mono text-xs font-semibold">STEP {{ selected_step_number }} OF {{ wizard_steps|length }}</div>
+  </div>
+
+  <div class="sm:text-right">
+    {% if next_step %}
+    <a class="btn btn-primary btn-sm" href="?step={{ next_step.key }}#workflow-stage">
+      <span><span class="block text-[9px] font-normal opacity-70">NEXT</span>{{ next_step.label }}</span>
+      <i class="bi bi-arrow-right"></i>
+    </a>
+    {% else %}
+    <button class="btn btn-primary btn-sm" disabled>NEXT<i class="bi bi-arrow-right"></i></button>
+    {% endif %}
+  </div>
+</nav>
