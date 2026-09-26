@@ -83,6 +83,7 @@ class UserProfile(TimeStampedModel):
     role = models.CharField(max_length=30, choices=Role.choices)
     job_title = models.CharField(max_length=120, blank=True)
     phone = models.CharField(max_length=40, blank=True)
+    photo = models.ImageField(upload_to="profiles/%Y/%m/", blank=True, null=True)
     can_override_workflow = models.BooleanField(default=False)
     portal_theme = models.CharField(max_length=30, choices=BOOTSWATCH_THEMES, default="default")
     color_mode = models.CharField(max_length=10, choices=ColorMode.choices, default=ColorMode.AUTO)
@@ -196,7 +197,13 @@ class Policy(TimeStampedModel):
         null=True, blank=True,
         help_text="Optional override of global cutoff. Example 30 or 60. Zero allows processing until policy expiry.",
     )
-    auto_stp = models.BooleanField(default=True)
+    auto_stp = models.BooleanField(default=True, help_text="When enabled, requests that pass validation and auto-approval rules can skip manual insurer approval.")
+    auto_approval_rules = models.JSONField(
+        default=dict, blank=True,
+        help_text="Optional insurer-controlled rules. Supported keys include min_validation_score, max_abs_premium_impact and block_on_risk_flags.",
+    )
+    intake_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="intake_policies")
+    validation_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="validation_policies")
     insurer_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="insurer_policies")
     tpa_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="tpa_policies")
     client_query_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="query_policies")
@@ -359,6 +366,7 @@ class EndorsementRequest(TimeStampedModel):
         SENT_TO_TPA = "SENT_TO_TPA", "Sent to TPA"
         TPA_IN_PROGRESS = "TPA_IN_PROGRESS", "TPA in progress"
         TPA_QUERY = "TPA_QUERY", "TPA query"
+        READY_FOR_CORE = "READY_FOR_CORE", "Ready for insurer processing"
         CORE_DISPATCHED = "CORE_DISPATCHED", "Dispatched to insurer core"
         COMPLETED = "COMPLETED", "Completed"
         REJECTED = "REJECTED", "Rejected"
@@ -428,8 +436,19 @@ class EndorsementItem(TimeStampedModel):
     annual_premium = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
     prorata_factor = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0.000000"))
     premium_impact = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
+    class TPAStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        QUERY = "QUERY", "Query raised"
+
     card_number = models.CharField(max_length=100, blank=True)
+    tpa_effective_date = models.DateField(null=True, blank=True)
     tpa_premium_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    tpa_status = models.CharField(max_length=20, choices=TPAStatus.choices, default=TPAStatus.PENDING)
+    tpa_decision_comment = models.TextField(blank=True)
+    tpa_decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="tpa_decided_endorsement_items")
+    tpa_decided_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.full_name or self.member_no or f"Item {self.pk}"
@@ -502,6 +521,7 @@ class EndorsementQuery(TimeStampedModel):
 
 class EndorsementApproval(TimeStampedModel):
     class ApprovalType(models.TextChoices):
+        INSURER_REVIEW = "INSURER_REVIEW", "Insurer manual review"
         EXISTING_MEMBER = "EXISTING_MEMBER", "Existing member exception"
         TPA_AMOUNT_CHANGE = "TPA_AMOUNT_CHANGE", "TPA amount change"
 
