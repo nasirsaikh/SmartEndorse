@@ -38,7 +38,7 @@
     <div class="se-workflow-wizard">
       {% for step in wizard_steps %}
       <a href="?step={{ step.key }}#workflow-stage"
-         class="se-workflow-step {% if step.state == 'active' %}is-current{% elif step.state == 'done' %}is-done{% endif %} {% if selected_step == step.key %}is-selected{% endif %}"
+         class="se-workflow-step {% if step.state == 'active' %}is-current{% elif step.state == 'done' %}is-done{% elif step.state == 'returned' %}is-returned{% endif %} {% if selected_step == step.key %}is-selected{% endif %}"
          {% if selected_step == step.key %}aria-current="step"{% endif %}>
         <div class="se-workflow-step-top">
           <span class="se-workflow-index">
@@ -47,7 +47,7 @@
           <div class="min-w-0">
             <div class="se-workflow-name">{{ step.label }}</div>
             <div class="se-workflow-state">
-              {% if step.state == "active" %}CURRENT{% elif step.state == "done" %}DONE{% else %}PENDING{% endif %}
+              {% if step.key == "completion" and endorsement.status == "COMPLETED" %}COMPLETED{% elif step.state == "active" %}CURRENT{% elif step.state == "done" %}DONE{% elif step.state == "returned" %}RETURNED{% else %}PENDING{% endif %}
             </div>
           </div>
         </div>
