@@ -86,8 +86,14 @@ def dashboard(request):
         current_sla_due_at__gt=timezone.now(),
         current_sla_due_at__lte=timezone.now() + timedelta(hours=24),
     ).exclude(status=EndorsementRequest.Status.COMPLETED).count()
-    completed_rows = list(qs.filter(status=EndorsementRequest.Status.COMPLETED, completed_at__isnull=False).only("created_at", "completed_at"))
-    completed_hours = [max((item.completed_at - item.created_at).total_seconds() / 3600, 0) for item in completed_rows]
+    completed_rows = qs.filter(
+        status=EndorsementRequest.Status.COMPLETED,
+        completed_at__isnull=False,
+    ).values_list("created_at", "completed_at")
+    completed_hours = [
+        max((completed_at - created_at).total_seconds() / 3600, 0)
+        for created_at, completed_at in completed_rows
+    ]
     avg_total_sla_hours = round(sum(completed_hours) / len(completed_hours), 1) if completed_hours else 0
     validation_scores = list(qs.values_list("validation_score", flat=True))
     avg_validation_score = round(sum(float(v or 0) for v in validation_scores) / len(validation_scores), 1) if validation_scores else 0
