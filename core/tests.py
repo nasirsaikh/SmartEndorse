@@ -12,7 +12,7 @@ from .models import (
     EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
     PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
-from .services import PricingEngine, ValidationService, WorkflowService
+from .services import FileIntakeService, PricingEngine, ValidationService, WorkflowService
 
 
 class BaseInsuranceTest(TestCase):
@@ -69,6 +69,120 @@ class AccessTests(TestCase):
         UserProfile.objects.create(user=user, organization=broker, role=UserProfile.Role.BROKER_USER)
         self.assertTrue(accessible_policies(user).filter(pk=policy.pk).exists())
         self.assertFalse(accessible_policies(user, require_create=True).filter(pk=policy.pk).exists())
+
+
+class IntakeNormalizationTests(BaseInsuranceTest):
+    def test_ai_nulls_do_not_erase_values_already_present_in_source_raw(self):
+        row = {
+            "_source_raw": {
+                "member_no": "IDOMN1365102783",
+                "employee_no": "136510278",
+                "national_id": "8",
+                "full_name": "ANKIT PRAMOD SHINGARE",
+                "relationship": None,
+                "date_of_birth": "1992-12-26",
+                "gender": "M",
+                "plan_code": "ANKIT PRAMOD SHINGARE",
+                "annual_salary": None,
+                "sum_assured": None,
+                "effective_date": "2026-09-13",
+            },
+            "member_no": "IDOMN1365102783",
+            "employee_no": None,
+            "national_id": None,
+            "full_name": None,
+            "relationship": None,
+            "date_of_birth": None,
+            "gender": None,
+            "plan_code": None,
+            "annual_salary": None,
+            "sum_assured": None,
+            "effective_date": None,
+        }
+        normalized = FileIntakeService._normalize_ai_row(row)
+        self.assertEqual(normalized["employee_no"], "136510278")
+        self.assertEqual(normalized["national_id"], "8")
+        self.assertEqual(normalized["full_name"], "ANKIT PRAMOD SHINGARE")
+        self.assertEqual(normalized["date_of_birth"], "1992-12-26")
+        self.assertEqual(normalized["gender"], "Male")
+        self.assertEqual(normalized["effective_date"], "2026-09-13")
+        self.assertIsNone(normalized["relationship"])
+
+    def test_plan_can_match_configured_plan_name_as_well_as_code(self):
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+        )
+        values = FileIntakeService._to_item_values(req, {
+            "full_name": "Member",
+            "date_of_birth": "1990-01-01",
+            "gender": "F",
+            "relationship": "self",
+            "plan_code": "Gold",
+        })
+        self.assertEqual(values["plan"], self.plan)
+        self.assertEqual(values["gender"], "Female")
+        self.assertEqual(values["relationship"], "Employee")
+
+    def test_validation_repairs_existing_item_from_stored_source_json(self):
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+        )
+        raw = {
+            "member_no": "IDOMN1365102783",
+            "employee_no": "136510278",
+            "national_id": "8",
+            "full_name": "ANKIT PRAMOD SHINGARE",
+            "relationship": None,
+            "date_of_birth": "1992-12-26",
+            "gender": "M",
+            "plan_code": "ANKIT PRAMOD SHINGARE",
+            "annual_salary": None,
+            "sum_assured": None,
+            "effective_date": self.today.isoformat(),
+        }
+        item = EndorsementItem.objects.create(
+            request=req,
+            member_no="IDOMN1365102783",
+            extracted_data={
+                "normalized": {
+                    "_source_raw": raw,
+                    "member_no": "IDOMN1365102783",
+                    "employee_no": None,
+                    "national_id": None,
+                    "full_name": None,
+                    "relationship": None,
+                    "date_of_birth": None,
+                    "gender": None,
+                    "plan_code": None,
+                    "annual_salary": None,
+                    "sum_assured": None,
+                    "effective_date": None,
+                },
+                "source_raw": raw,
+            },
+        )
+        errors, _ = ValidationService.validate(req)
+        item.refresh_from_db()
+        self.assertEqual(item.employee_no, "136510278")
+        self.assertEqual(item.national_id, "8")
+        self.assertEqual(item.full_name, "ANKIT PRAMOD SHINGARE")
+        self.assertEqual(item.date_of_birth, date(1992, 12, 26))
+        self.assertEqual(item.gender, "Male")
+        self.assertEqual(item.effective_date, self.today)
+        self.assertEqual(item.validation_errors, ["Relationship is required.", "Plan is required."])
+        self.assertTrue(any("Relationship is required." in error for error in errors))
+        self.assertTrue(any("Plan is required." in error for error in errors))
+        self.assertFalse(any("Full Name is required." in error for error in errors))
+        self.assertFalse(any("Date Of Birth is required." in error for error in errors))
+        self.assertFalse(any("Gender is required." in error for error in errors))
 
 
 class ValidationAndApprovalTests(BaseInsuranceTest):
