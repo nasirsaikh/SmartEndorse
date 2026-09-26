@@ -380,7 +380,14 @@ class FileIntakeService:
                 or merged.get("member_no")
                 or merged.get("employee_no")
             )
-            if merged.get("full_name") and identity_found:
+            source = row.get("_source_raw") if isinstance(row.get("_source_raw"), dict) else {}
+            passport = source.get("passport") if isinstance(source.get("passport"), dict) else {}
+            passport_identity_found = bool(
+                passport.get("passport_no")
+                and merged.get("full_name")
+                and merged.get("date_of_birth")
+            )
+            if merged.get("full_name") and identity_found or passport_identity_found:
                 break
 
         merged["_source_raw"] = {
