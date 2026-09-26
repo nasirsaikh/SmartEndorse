@@ -1,31 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Sign in | SmartEndorse{% endblock %}
+{% block title %}Log in | SmartEndorse{% endblock %}
 {% block unauthenticated %}
-<div class="login-shell">
-  <div class="login-brand">
-    <div class="brand-mark brand-mark-large">SE</div>
-    <div class="eyebrow text-primary mt-4">AUTONOMOUS GROUP INSURANCE ENDORSEMENTS</div>
-    <h1 class="display-5 fw-bold">From request to fulfilment without the email chase.</h1>
-    <p class="lead text-secondary">A shared operating layer for clients, brokers, insurers and TPAs with AI-assisted intake, deterministic pricing, STP routing and SLA visibility.</p>
-    <div class="login-feature-grid">
-      <div><strong>Medical</strong><span>Auto-route to configured TPA</span></div>
-      <div><strong>Group Life</strong><span>Dispatch directly to insurer core</span></div>
-      <div><strong>AI switchable</strong><span>Ollama, OpenAI, Claude or compatible API</span></div>
-      <div><strong>Auditable</strong><span>Every state change is recorded</span></div>
+<div class="portal-login-shell">
+  <div class="portal-login">
+    <div class="portal-login-header">
+      <h1>SmartEndorse</h1>
+      <p>Group Insurance Endorsement Management</p>
     </div>
-  </div>
-  <div class="login-card">
-    <div class="mb-4"><div class="eyebrow text-primary">WELCOME BACK</div><h2 class="h3">Sign in to SmartEndorse</h2></div>
-    {% if form.errors %}<div class="alert alert-danger">Invalid username or password.</div>{% endif %}
-    <form method="post">
-      {% csrf_token %}
-      <label class="form-label">Username</label>
-      <input type="text" name="username" autofocus class="form-control form-control-lg mb-3">
-      <label class="form-label">Password</label>
-      <input type="password" name="password" class="form-control form-control-lg mb-4">
-      <button class="btn btn-primary btn-lg w-100">Sign in</button>
-    </form>
-    <p class="small text-secondary mt-4 mb-0">Demo users are created by the seed_demo management command.</p>
+    <div class="login-form">
+      {% if form.errors %}<p class="errornote">Please enter a correct username and password.</p>{% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <div class="form-row">
+          <label for="id_username">Username</label>
+          <input type="text" name="username" autofocus autocomplete="username" id="id_username">
+        </div>
+        <div class="form-row">
+          <label for="id_password">Password</label>
+          <input type="password" name="password" autocomplete="current-password" id="id_password">
+        </div>
+        <div class="submit-row"><input type="submit" value="Log in"></div>
+      </form>
+      <p class="portal-login-note">Access is controlled by your SmartEndorse organization and role assignment.</p>
+    </div>
   </div>
 </div>
 {% endblock %}
