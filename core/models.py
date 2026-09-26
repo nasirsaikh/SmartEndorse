@@ -223,7 +223,7 @@ class PolicyPlan(TimeStampedModel):
         constraints = [models.UniqueConstraint(fields=["policy", "code"], name="uq_policy_plan_code")]
 
     def __str__(self):
-        return f"{self.policy.policy_number} / {self.code}"
+        return f"{self.policy.policy_number} / {self.code} - {self.name}"
 
 
 class PolicyAccess(TimeStampedModel):
