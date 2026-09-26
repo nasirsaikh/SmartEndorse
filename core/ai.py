@@ -327,7 +327,7 @@ class AIService:
                 self.config.provider == AIProviderConfig.Provider.OLLAMA
                 and "glm-ocr" in (self.config.model_name or "").lower()
             ):
-                ocr_text = self._vision_ocr_text(encoded, mime)
+                ocr_text = self._vision_form_text(encoded, mime)
                 return self.extract_form_fields_from_text(ocr_text)
 
             rows = self.extract_image_bytes(content, mime)
@@ -575,6 +575,46 @@ class AIService:
                 f"Ollama {endpoint} returned a non-JSON HTTP response for model "
                 f"'{self.config.model_name}': {preview or '<empty response>'}"
             ) from exc
+
+    def _vision_form_text(self, encoded, mime):
+        """
+        Fast OCR specifically for the member correction form.
+
+        GLM-OCR is asked for short labelled text only. We intentionally avoid
+        JSON/schema generation here because the form parser consumes the labels
+        directly.
+        """
+        cfg = self.config
+        if cfg.provider != AIProviderConfig.Provider.OLLAMA:
+            raise RuntimeError("Direct OCR form filling currently requires an Ollama vision provider.")
+
+        base = self._base_url()
+        url = base + "/api/chat"
+        options = self._ollama_runtime_options(vision=True)
+        options["num_ctx"] = min(int(options.get("num_ctx") or 4096), 4096)
+        options["num_predict"] = min(int(options.get("num_predict") or 512), 512)
+        options["temperature"] = 0.0
+
+        prompt = (
+            "Text Recognition: Read only the visible member information in this document. "
+            "Return short plain-text labelled lines only for fields that are visible. "
+            "Use these labels when possible: Member No, Employee No, Civil ID, Full Name, "
+            "Relationship, Date of Birth, Gender, Plan, Effective Date. "
+            "Do not explain, do not summarize, do not repeat text, and do not return JSON."
+        )
+        payload = {
+            "model": cfg.model_name,
+            "stream": False,
+            "messages": [{"role": "user", "content": prompt, "images": [encoded]}],
+            "options": options,
+            "keep_alive": self._ollama_keep_alive(),
+        }
+
+        with httpx.Client(timeout=cfg.timeout_seconds) as client:
+            response = client.post(url, headers=self._headers(), json=payload)
+            data = self._ollama_response_json(response, client, base, "/api/chat")
+
+        return (data.get("message") or {}).get("content", "")
 
     def _vision_ocr_text(self, encoded, mime):
         cfg = self.config
