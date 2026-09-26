@@ -311,6 +311,95 @@ class FileIntakeService:
         raise ValueError("Unsupported file type. Use XLSX, XLS, CSV, PDF, PNG, JPG, JPEG or WEBP.")
 
     @classmethod
+    def extract_item_form_fields(cls, attachment):
+        """
+        Extract one member correction form from PDF/image evidence.
+
+        This path intentionally does not require the OCR model to produce JSON.
+        GLM-OCR returns text and SmartEndorse maps labelled values directly into
+        the correction form.
+        """
+        ext = Path(attachment.original_name).suffix.lower()
+        ai = cls._ai_for_request(attachment.request)
+
+        if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+            mime = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+            }[ext]
+            row = ai.extract_form_fields_from_image_bytes(Path(attachment.file.path).read_bytes(), mime)
+            normalized = cls._normalize_ai_row(row)
+            return [row.get("_source_raw", row)], [normalized], {
+                "method": "item_form_direct_ocr",
+                "ai_profile": ai.last_profile_name,
+                "json_mapping": False,
+            }
+
+        if ext != ".pdf":
+            raise ValueError("Form OCR accepts PDF, PNG, JPG, JPEG or WEBP only.")
+
+        reader = PdfReader(attachment.file.path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if text.strip():
+            row = ai.extract_form_fields_from_text(text)
+            normalized = cls._normalize_ai_row(row)
+            return [row.get("_source_raw", row)], [normalized], {
+                "method": "item_form_pdf_text",
+                "page_count": len(reader.pages),
+                "ai_profile": ai.last_profile_name,
+                "json_mapping": False,
+            }
+
+        ai._require_provider(vision=True)
+        try:
+            import fitz
+        except ImportError as exc:
+            raise RuntimeError("Scanned PDF OCR requires PyMuPDF and a vision-capable AI provider.") from exc
+
+        doc = fitz.open(attachment.file.path)
+        merged = {key: None for key in CANONICAL_FIELDS}
+        source_pages = []
+        pages_processed = 0
+
+        for page_number, page in enumerate(doc[:3], start=1):
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+            row = ai.extract_form_fields_from_image_bytes(pix.tobytes("png"), "image/png")
+            source_pages.append({
+                "page": page_number,
+                "ocr": row.get("_source_raw", {}),
+            })
+            for key in CANONICAL_FIELDS:
+                if merged.get(key) in (None, "") and row.get(key) not in (None, ""):
+                    merged[key] = row.get(key)
+            pages_processed += 1
+
+            identity_found = bool(
+                merged.get("national_id")
+                or merged.get("member_no")
+                or merged.get("employee_no")
+            )
+            if merged.get("full_name") and identity_found:
+                break
+
+        merged["_source_raw"] = {
+            "pages": source_pages,
+            "extraction_mode": "direct_form_fill",
+        }
+        normalized = cls._normalize_ai_row(merged)
+        if not any(normalized.get(key) not in (None, "") for key in CANONICAL_FIELDS):
+            raise ValueError("OCR completed, but no recognizable member fields were found.")
+
+        return source_pages, [normalized], {
+            "method": "item_form_pdf_vision",
+            "page_count": len(doc),
+            "pages_processed": pages_processed,
+            "ai_profile": ai.last_profile_name,
+            "json_mapping": False,
+        }
+
+    @classmethod
     def _xlsx_rows(cls, path):
         wb = load_workbook(path, read_only=True, data_only=True)
         ws = wb.active

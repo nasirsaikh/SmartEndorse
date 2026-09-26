@@ -467,7 +467,7 @@ def edit_item(request, pk, item_id):
                 extracted_payload={"usage": "item_ocr_preview", "target_item_id": item.pk},
             )
             try:
-                raw_rows, normalized_rows, metadata = FileIntakeService._extract(attachment)
+                raw_rows, normalized_rows, metadata = FileIntakeService.extract_item_form_fields(attachment)
                 target_row = None
                 if len(normalized_rows) == 1:
                     target_row = normalized_rows[0]
@@ -521,7 +521,10 @@ def edit_item(request, pk, item_id):
                 )
                 ocr_source = attachment.original_name
                 ocr_preview = values
-                messages.info(request, "OCR values were extracted into the form. Review them, then click Save & revalidate.")
+                messages.info(
+                    request,
+                    "Document fields were read directly into the form. Review the values, then click Save & revalidate.",
+                )
             except Exception as exc:
                 attachment.processing_error = str(exc)
                 attachment.processed = False
