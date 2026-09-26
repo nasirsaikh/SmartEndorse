@@ -1374,19 +1374,20 @@ class WorkflowService:
         cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA processing started.")
 
     @classmethod
-    def update_tpa_item(cls, item, actor, card_number, amount):
+    def update_tpa_item(cls, item, actor, card_number, effective_date, amount):
         request_obj = item.request
         if request_obj.policy.product != Policy.Product.GROUP_MEDICAL:
             raise ValueError("TPA card/amount processing applies only to Group Medical endorsements.")
-        old_card, old_amount = item.card_number, item.tpa_premium_amount
+        old_card, old_effective_date, old_amount = item.card_number, item.tpa_effective_date, item.tpa_premium_amount
         amount = Decimal(str(amount)) if amount not in (None, "") else item.premium_impact
         item.card_number = str(card_number or "").strip()
+        item.tpa_effective_date = effective_date
         item.tpa_premium_amount = amount
-        item.save(update_fields=["card_number", "tpa_premium_amount", "updated_at"])
+        item.save(update_fields=["card_number", "tpa_effective_date", "tpa_premium_amount", "updated_at"])
         WorkflowEvent.objects.create(
             request=request_obj, actor=actor, event_type="TPA_ITEM_UPDATED",
             description=f"TPA updated card/amount for item {item.pk}.",
-            payload=json_safe({"item_id": item.pk, "before": {"card_number": old_card, "amount": old_amount}, "after": {"card_number": item.card_number, "amount": amount}}),
+            payload=json_safe({"item_id": item.pk, "before": {"card_number": old_card, "effective_date": old_effective_date, "amount": old_amount}, "after": {"card_number": item.card_number, "effective_date": effective_date, "amount": amount}}),
         )
         if amount != item.premium_impact:
             cfg = platform_config()
@@ -1433,7 +1434,7 @@ class WorkflowService:
                 approval.item.save(update_fields=["tpa_premium_amount", "updated_at"])
                 cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA amount change rejected; system-calculated amount restored.")
             else:
-                cls.transition(request_obj, EndorsementRequest.Status.REJECTED, actor, "Existing member exception was rejected by the insurer.")
+                cls.transition(request_obj, EndorsementRequest.Status.REJECTED, actor, f"Insurance review rejected the request. Correction required: {comment}")
             return request_obj
 
         if request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING).exists():
@@ -1464,8 +1465,13 @@ class WorkflowService:
             raise ValueError("The endorsement still contains validation errors.")
         if request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING).exists():
             raise ValueError("Pending approval(s) must be completed first.")
-        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL and request_obj.items.filter(card_number="").exists():
-            raise ValueError("Card number is mandatory for every Medical endorsement item before completion.")
+        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL:
+            if request_obj.items.filter(card_number="").exists():
+                raise ValueError("Card number is mandatory for every Medical endorsement item before completion.")
+            if request_obj.items.filter(tpa_effective_date=None).exists():
+                raise ValueError("TPA effective date is mandatory for every Medical endorsement item before completion.")
+            if request_obj.items.filter(tpa_premium_amount=None).exists():
+                raise ValueError("TPA premium/refund amount is mandatory for every Medical endorsement item before completion.")
         if external_reference:
             request_obj.external_reference = external_reference
             request_obj.save(update_fields=["external_reference", "updated_at"])
