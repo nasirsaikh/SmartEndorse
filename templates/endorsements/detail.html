@@ -98,10 +98,21 @@
 
   {% if has_blocking_document_issues %}
   <div class="p-4">
-    <div class="mb-3 flex items-center gap-2">
-      <i class="bi bi-file-earmark-x text-warning"></i>
-      <strong class="text-sm">Document processing issues</strong>
+    <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex items-center gap-2">
+        <i class="bi bi-file-earmark-x text-warning"></i>
+        <strong class="text-sm">Document processing issues</strong>
+      </div>
+      {% if can_edit %}
+      <form method="post" action="{% url 'endorsement_retry_failed_evidence' endorsement.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-warning btn-sm" type="submit">
+          <i class="bi bi-layers"></i>RETRY FAILED DOCUMENTS TOGETHER
+        </button>
+      </form>
+      {% endif %}
     </div>
+    <div class="mb-3 text-[10px] leading-4 opacity-55">PDF/image failures can be retried as one evidence bundle so front/back ID files and multi-page documents complement each other before member matching.</div>
     <div class="space-y-2">
       {% for issue in document_issues %}
         {% if issue.blocking %}
@@ -218,7 +229,7 @@
               <div class="w-full text-center">
                 <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
                 <strong class="font-mono text-xs tracking-wider">DROP CORRECTION FILES</strong>
-                <div class="mt-2 text-[10px] opacity-55">Excel, CSV, PDF and images · multiple files supported</div>
+                <div class="mt-2 text-[10px] opacity-55">Excel/CSV remain structured sources. PDF/images selected together are combined as one evidence bundle, including separate front/back ID files.</div>
                 <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">BROWSE FILES</button>
                 <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No files selected</div>
               </div>

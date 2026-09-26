@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 from datetime import timedelta
+from pathlib import Path
 import logging
 
 import plotly.graph_objects as go
@@ -266,9 +267,34 @@ def create_request(request):
             endorsement.save()
             if form.has_manual_item():
                 EndorsementItem.objects.create(request=endorsement, **form.manual_item_payload())
+
+            created_attachments = []
             for upload in form.cleaned_data.get("attachments", []):
-                attachment = Attachment.objects.create(request=endorsement, file=upload, original_name=upload.name, kind=FileIntakeService.kind_for_name(upload.name))
+                created_attachments.append(Attachment.objects.create(
+                    request=endorsement,
+                    file=upload,
+                    original_name=upload.name,
+                    kind=FileIntakeService.kind_for_name(upload.name),
+                ))
+
+            evidence_attachments = [
+                attachment for attachment in created_attachments
+                if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+            ]
+            structured_attachments = [
+                attachment for attachment in created_attachments
+                if attachment not in evidence_attachments
+            ]
+
+            for attachment in structured_attachments:
                 FileIntakeService.process(attachment)
+
+            if evidence_attachments:
+                try:
+                    FileIntakeService.process_initial_evidence_bundle(evidence_attachments)
+                except Exception:
+                    logger.exception("Initial evidence bundle failed for endorsement %s", endorsement.pk)
+
             WorkflowEvent.objects.create(request=endorsement, actor=request.user, event_type="REQUEST_CREATED", description="Endorsement request created.")
             WorkflowService.submit(endorsement, request.user)
             if endorsement.status == EndorsementRequest.Status.NEEDS_INFO:
@@ -386,6 +412,53 @@ def request_detail(request, pk):
 
 
 @login_required
+def retry_failed_evidence_bundle(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.error(request, "Failed documents can only be retried while the endorsement is in validation/correction.")
+        return redirect("endorsement_detail", pk=pk)
+
+    failed = []
+    for attachment in endorsement.attachments.exclude(processing_error=""):
+        if Path(attachment.original_name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
+        if payload.get("usage") == "item_ocr_preview":
+            continue
+        failed.append(attachment)
+    if not failed:
+        messages.info(request, "There are no failed PDF/image documents to retry.")
+        return redirect("endorsement_detail", pk=pk)
+
+    try:
+        if endorsement.items.exists():
+            result = FileIntakeService.process_supplemental_evidence_bundle(failed)
+        else:
+            result = FileIntakeService.process_initial_evidence_bundle(failed)
+
+        WorkflowService.revalidate_after_correction(endorsement, request.user)
+        messages.success(
+            request,
+            f"{result['processed']} failed document(s) were retried together as one evidence bundle; "
+            f"{result['rows']} member row(s) were identified.",
+        )
+    except Exception as exc:
+        logger.exception("Failed evidence bundle retry failed for endorsement %s", endorsement.pk)
+        messages.error(request, f"Failed document bundle could not be recovered: {exc}")
+
+    return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
 def revalidate_request(request, pk):
     if request.method != "POST":
         return HttpResponse(status=405)
@@ -457,17 +530,22 @@ def edit_item(request, pk, item_id):
         ocr_form = ItemOCRFillForm(request.POST, request.FILES)
         form = EndorsementItemCorrectionForm(instance=item)
         if ocr_form.is_valid():
-            upload = ocr_form.cleaned_data["ocr_file"]
-            attachment = Attachment.objects.create(
-                request=endorsement,
-                file=upload,
-                original_name=upload.name,
-                kind=FileIntakeService.kind_for_name(upload.name),
-                is_supplemental=True,
-                extracted_payload={"usage": "item_ocr_preview", "target_item_id": item.pk},
-            )
+            attachments = []
+            for upload in ocr_form.cleaned_data["ocr_files"]:
+                attachments.append(Attachment.objects.create(
+                    request=endorsement,
+                    file=upload,
+                    original_name=upload.name,
+                    kind=FileIntakeService.kind_for_name(upload.name),
+                    is_supplemental=True,
+                    extracted_payload={
+                        "usage": "item_ocr_preview",
+                        "target_item_id": item.pk,
+                        "evidence_bundle": True,
+                    },
+                ))
             try:
-                raw_rows, normalized_rows, metadata = FileIntakeService.extract_item_form_fields(attachment)
+                raw_rows, normalized_rows, metadata = FileIntakeService.extract_item_form_fields_group(attachments)
                 target_row = None
                 if len(normalized_rows) == 1:
                     target_row = normalized_rows[0]
@@ -501,34 +579,41 @@ def edit_item(request, pk, item_id):
                     initial["sum_assured"] = values["plan"].sum_assured
 
                 form = EndorsementItemCorrectionForm(instance=item, initial=initial)
-                attachment.extracted_payload = json_safe({
-                    "source_file": attachment.original_name,
+                bundle_payload = json_safe({
                     "raw_rows": raw_rows,
                     "normalized_rows": normalized_rows,
                     **metadata,
                     "usage": "item_ocr_preview",
                     "ocr_fill_target_item": item.pk,
+                    "evidence_bundle": True,
                 })
-                attachment.processed = True
-                attachment.processing_error = ""
-                attachment.save(update_fields=["extracted_payload", "processed", "processing_error", "updated_at"])
+                for attachment in attachments:
+                    attachment.extracted_payload = {
+                        **bundle_payload,
+                        "source_file": attachment.original_name,
+                    }
+                    attachment.processed = True
+                    attachment.processing_error = ""
+                    attachment.save(update_fields=["extracted_payload", "processed", "processing_error", "updated_at"])
+                source_names = [attachment.original_name for attachment in attachments]
                 WorkflowEvent.objects.create(
                     request=endorsement,
                     actor=request.user,
                     event_type="ITEM_OCR_PREVIEW",
-                    description=f"OCR extracted correction values for item {item.pk} from {attachment.original_name}.",
-                    payload={"item_id": item.pk, "source": attachment.original_name, "extracted": json_safe(values)},
+                    description=f"OCR extracted correction values for item {item.pk} from {len(attachments)} evidence file(s).",
+                    payload={"item_id": item.pk, "sources": source_names, "extracted": json_safe(values)},
                 )
-                ocr_source = attachment.original_name
+                ocr_source = ", ".join(source_names)
                 ocr_preview = values
                 messages.info(
                     request,
                     "Document fields were read directly into the form. Review the values, then click Save & revalidate.",
                 )
             except Exception as exc:
-                attachment.processing_error = str(exc)
-                attachment.processed = False
-                attachment.save(update_fields=["processing_error", "processed", "updated_at"])
+                for attachment in attachments:
+                    attachment.processing_error = str(exc)
+                    attachment.processed = False
+                    attachment.save(update_fields=["processing_error", "processed", "updated_at"])
                 messages.error(request, f"OCR extraction failed: {exc}")
         return render(request, "endorsements/item_edit.html", {
             "endorsement": endorsement, "item": item, "form": form, "ocr_form": ocr_form,
@@ -615,19 +700,46 @@ def supplemental_upload(request, pk):
 
     processed = 0
     failures = []
+    warnings = []
     try:
+        created_attachments = []
         for upload in form.cleaned_data["attachments"]:
-            attachment = Attachment.objects.create(
+            created_attachments.append(Attachment.objects.create(
                 request=endorsement,
                 file=upload,
                 original_name=upload.name,
                 kind=FileIntakeService.kind_for_name(upload.name),
                 is_supplemental=True,
-            )
+            ))
+
+        evidence_attachments = [
+            attachment for attachment in created_attachments
+            if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+        ]
+        structured_attachments = [
+            attachment for attachment in created_attachments
+            if attachment not in evidence_attachments
+        ]
+
+        for attachment in structured_attachments:
             if FileIntakeService.process(attachment):
                 processed += 1
             else:
                 failures.append(f"{attachment.original_name}: {attachment.processing_error or 'extraction failed'}")
+
+        if evidence_attachments:
+            try:
+                bundle_result = FileIntakeService.process_supplemental_evidence_bundle(evidence_attachments)
+                processed += bundle_result["processed"]
+                warnings.extend(
+                    f"{item['file_name']}: {item['error']}"
+                    for item in bundle_result.get("warnings", [])
+                )
+            except Exception as exc:
+                failures.extend(
+                    f"{attachment.original_name}: {attachment.processing_error or str(exc)}"
+                    for attachment in evidence_attachments
+                )
 
         if processed:
             WorkflowService.revalidate_after_correction(endorsement, request.user)
@@ -638,10 +750,16 @@ def supplemental_upload(request, pk):
                 messages.warning(request, f"{processed} validation file(s) were processed, but some failed: {text}")
             else:
                 messages.error(request, f"Validation upload failed for {endorsement.reference}: {text}")
+        elif warnings:
+            messages.warning(
+                request,
+                f"{processed} validation file(s) were applied as one evidence bundle. "
+                f"Some files could not be read, but the remaining evidence was sufficient: {'; '.join(warnings)}",
+            )
         else:
             messages.success(
                 request,
-                f"{processed} validation file(s) processed. Existing uniquely matched rows were updated and new unmatched members were added safely.",
+                f"{processed} validation file(s) processed. PDF/image files uploaded together were treated as one evidence bundle, so front/back pages can complement each other.",
             )
     except Exception as exc:
         logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)

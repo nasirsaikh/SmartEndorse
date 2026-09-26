@@ -141,25 +141,24 @@ class SupplementalUploadForm(forms.Form):
 
 
 class ItemOCRFillForm(forms.Form):
-    ocr_file = forms.FileField(
+    ocr_files = MultiFileField(
         required=True,
-        widget=forms.ClearableFileInput(attrs={
+        widget=MultiFileInput(attrs={
             "accept": ".pdf,.png,.jpg,.jpeg,.webp",
             "class": "portal-file-input",
             "data-drop-input": "true",
+            "multiple": True,
         }),
     )
 
-    def clean_ocr_file(self):
-        upload = self.cleaned_data["ocr_file"]
-        from pathlib import Path
-        ext = Path(upload.name).suffix.lower()
-        if ext not in OCR_EXTENSIONS:
-            raise forms.ValidationError("Use PDF, PNG, JPG, JPEG or WEBP only.")
-        max_bytes = platform_config().maximum_upload_mb * 1024 * 1024
-        if upload.size > max_bytes:
-            raise forms.ValidationError(f"{upload.name} exceeds the {platform_config().maximum_upload_mb} MB upload limit.")
-        return upload
+    def clean_ocr_files(self):
+        uploads = self.cleaned_data["ocr_files"]
+        for upload in uploads:
+            from pathlib import Path
+            ext = Path(upload.name).suffix.lower()
+            if ext not in OCR_EXTENSIONS:
+                raise forms.ValidationError("Use PDF, PNG, JPG, JPEG or WEBP only.")
+        return uploads
 
 
 class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):

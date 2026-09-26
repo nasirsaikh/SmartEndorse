@@ -272,7 +272,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    @patch("core.views.FileIntakeService.extract_item_form_fields")
+    @patch("core.views.FileIntakeService.extract_item_form_fields_group")
     def test_item_ocr_fills_preview_without_saving_until_review(self, extract_mock):
         self.grant_client_access()
         req = EndorsementRequest.objects.create(
@@ -301,7 +301,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         upload = SimpleUploadedFile("member.jpg", b"fake-image", content_type="image/jpeg")
         response = http.post(
             f"/endorsements/{req.pk}/items/{item.pk}/edit/",
-            {"action": "ocr_fill", "ocr_file": upload},
+            {"action": "ocr_fill", "ocr_files": [upload]},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "OCR Name")
@@ -311,6 +311,200 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertEqual(item.full_name, "Old Name")
         ocr_attachment = req.attachments.order_by("-pk").first()
         self.assertEqual(ocr_attachment.extracted_payload.get("usage"), "item_ocr_preview")
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.extract_item_form_fields_group")
+    def test_item_ocr_combines_front_and_back_files_in_one_bundle(self, extract_mock):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        item = EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1",
+            full_name="Existing Name",
+            relationship="Employee",
+            gender="Male",
+            effective_date=self.today,
+        )
+        extract_mock.return_value = (
+            [{"file_name": "ID Front.jpeg"}, {"file_name": "ID Back.jpeg"}],
+            [{
+                "employee_no": "E1",
+                "national_id": "12345678",
+                "full_name": "Combined Name",
+                "relationship": "Employee",
+                "gender": "Male",
+                "date_of_birth": "1990-01-02",
+                "plan_code": "G",
+            }],
+            {
+                "method": "item_form_multi_evidence_semantic",
+                "source_files": ["ID Front.jpeg", "ID Back.jpeg"],
+                "warnings": [],
+            },
+        )
+        http = Client()
+        http.force_login(self.requester)
+        front = SimpleUploadedFile("ID Front.jpeg", b"front", content_type="image/jpeg")
+        back = SimpleUploadedFile("ID Back.jpeg", b"back", content_type="image/jpeg")
+
+        response = http.post(
+            f"/endorsements/{req.pk}/items/{item.pk}/edit/",
+            {"action": "ocr_fill", "ocr_files": [front, back]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Combined Name")
+        self.assertContains(response, "ID Front.jpeg, ID Back.jpeg")
+        self.assertEqual(req.attachments.filter(extracted_payload__usage="item_ocr_preview").count(), 2)
+        args = extract_mock.call_args.args[0]
+        self.assertEqual(len(args), 2)
+        self.assertEqual({a.original_name for a in args}, {"ID Front.jpeg", "ID Back.jpeg"})
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.process_supplemental_evidence_bundle")
+    @patch("core.views.WorkflowService.revalidate_after_correction")
+    def test_supplemental_front_and_back_are_processed_as_one_evidence_bundle(self, revalidate_mock, bundle_mock):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        bundle_mock.return_value = {
+            "processed": 2,
+            "rows": 1,
+            "result": {"updated_items": 1, "created_items": 0},
+            "warnings": [],
+        }
+        http = Client()
+        http.force_login(self.requester)
+        front = SimpleUploadedFile("Faiyz Id Front.jpeg", b"front", content_type="image/jpeg")
+        back = SimpleUploadedFile("Faiyz Id Back.jpeg", b"back", content_type="image/jpeg")
+
+        response = http.post(
+            f"/endorsements/{req.pk}/supplement/",
+            {"attachments": [front, back]},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(req.attachments.count(), 2)
+        bundle_args = bundle_mock.call_args.args[0]
+        self.assertEqual(len(bundle_args), 2)
+        self.assertEqual(
+            {attachment.original_name for attachment in bundle_args},
+            {"Faiyz Id Front.jpeg", "Faiyz Id Back.jpeg"},
+        )
+        revalidate_mock.assert_called_once()
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.process_initial_evidence_bundle")
+    def test_new_request_bundles_front_and_back_evidence(self, bundle_mock):
+        self.grant_client_access()
+        bundle_mock.return_value = {
+            "processed": 2,
+            "rows": 1,
+            "created_items": 1,
+            "warnings": [],
+        }
+        http = Client()
+        http.force_login(self.requester)
+        front = SimpleUploadedFile("ID Front.jpeg", b"front", content_type="image/jpeg")
+        back = SimpleUploadedFile("ID Back.jpeg", b"back", content_type="image/jpeg")
+
+        response = http.post(
+            "/endorsements/new/",
+            {
+                "policy": str(self.policy.pk),
+                "endorsement_type": EndorsementRequest.Type.ADDITION,
+                "effective_date": self.today.isoformat(),
+                "attachments": [front, back],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bundle_args = bundle_mock.call_args.args[0]
+        self.assertEqual(len(bundle_args), 2)
+        self.assertEqual(
+            {attachment.original_name for attachment in bundle_args},
+            {"ID Front.jpeg", "ID Back.jpeg"},
+        )
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("core.views.FileIntakeService.process_supplemental_evidence_bundle")
+    @patch("core.views.WorkflowService.revalidate_after_correction")
+    def test_retry_failed_documents_processes_existing_failures_as_one_bundle(self, revalidate_mock, bundle_mock):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+        )
+        EndorsementItem.objects.create(
+            request=req,
+            full_name="Faiyz Example",
+            relationship="Employee",
+            gender="Male",
+            plan=self.plan,
+            effective_date=self.today,
+        )
+        front = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("Faiyz Id Front.jpeg", b"front", content_type="image/jpeg"),
+            original_name="Faiyz Id Front.jpeg",
+            kind=Attachment.Kind.IMAGE,
+            is_supplemental=True,
+            processed=False,
+            processing_error="old extraction error",
+        )
+        back = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("Faiyz Id Back.jpeg", b"back", content_type="image/jpeg"),
+            original_name="Faiyz Id Back.jpeg",
+            kind=Attachment.Kind.IMAGE,
+            is_supplemental=True,
+            processed=False,
+            processing_error="old extraction error",
+        )
+        bundle_mock.return_value = {
+            "processed": 2,
+            "rows": 1,
+            "result": {"updated_items": 1},
+            "warnings": [],
+        }
+
+        http = Client()
+        http.force_login(self.requester)
+        response = http.post(f"/endorsements/{req.pk}/retry-failed-evidence/")
+
+        self.assertEqual(response.status_code, 302)
+        bundle_args = bundle_mock.call_args.args[0]
+        self.assertEqual({attachment.pk for attachment in bundle_args}, {front.pk, back.pk})
+        revalidate_mock.assert_called_once()
 
     def test_member_validation_error_identifies_member(self):
         req = EndorsementRequest.objects.create(
@@ -876,6 +1070,50 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertIn("nomenclature are unknown", payload["messages"][0]["content"])
         self.assertIn("do not return JSON", payload["messages"][0]["content"])
         self.assertTrue(payload["messages"][0]["images"])
+
+    @patch.object(AIService, "_semantic_form_mapper")
+    def test_semantic_rows_bundle_merges_front_and_back_into_one_member(self, mapper_mock):
+        mapper = MagicMock()
+        mapper._profile.return_value = None
+        mapper.config.name = "Mapper"
+        mapper.config.model_name = "qwen2.5:7b"
+        mapper.context = {
+            "valid_plans": [{"code": "G", "name": "Gold"}],
+        }
+        mapper._chat.return_value = (
+            '{"items":[{'
+            '"member_no":null,'
+            '"employee_no":null,'
+            '"national_id":"12345678",'
+            '"full_name":"Faiyz Example",'
+            '"relationship":null,'
+            '"date_of_birth":"1990-01-02",'
+            '"gender":"Male",'
+            '"plan_code":null,'
+            '"annual_salary":null,'
+            '"sum_assured":null,'
+            '"effective_date":null'
+            '}]}'
+        )
+        mapper._parse_json_array.side_effect = AIService._parse_json_array
+        mapper._resolve_form_plan.side_effect = lambda value, text: value
+        ai = AIService(
+            product=Policy.Product.GROUP_MEDICAL,
+            context={"valid_plans": [{"code": "G", "name": "Gold"}]},
+        )
+        mapper_mock.return_value = mapper
+
+        rows = ai.semantic_rows_from_text(
+            "===== FILE: Faiyz Id Front.jpeg =====\nName: Faiyz Example\n"
+            "===== FILE: Faiyz Id Back.jpeg =====\nID: 12345678\nDOB: 02/01/1990"
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["full_name"], "Faiyz Example")
+        self.assertEqual(rows[0]["national_id"], "12345678")
+        prompt = mapper._chat.call_args.args[0]
+        self.assertIn("front and back of the same ID", prompt)
+        self.assertIn("Combine complementary evidence", prompt)
 
     @patch("core.ai.httpx.Client")
     def test_bakllava_vision_uses_generate_endpoint_and_json_mode(self, client_cls):

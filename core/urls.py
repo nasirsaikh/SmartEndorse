@@ -12,6 +12,7 @@ urlpatterns = [
     path("endorsements/new/", views.create_request, name="endorsement_create"),
     path("endorsements/<int:pk>/", views.request_detail, name="endorsement_detail"),
     path("endorsements/<int:pk>/revalidate/", views.revalidate_request, name="endorsement_revalidate"),
+    path("endorsements/<int:pk>/retry-failed-evidence/", views.retry_failed_evidence_bundle, name="endorsement_retry_failed_evidence"),
     path("endorsements/<int:pk>/attachments/<int:attachment_id>/remove-failed/", views.remove_failed_attachment, name="endorsement_remove_failed_attachment"),
     path("endorsements/<int:pk>/recovery/", views.bulk_recovery, name="endorsement_bulk_recovery"),
     path("endorsements/<int:pk>/supplement/", views.supplemental_upload, name="endorsement_supplemental_upload"),

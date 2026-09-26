@@ -311,6 +311,228 @@ class FileIntakeService:
         raise ValueError("Unsupported file type. Use XLSX, XLS, CSV, PDF, PNG, JPG, JPEG or WEBP.")
 
     @classmethod
+    def _attachment_evidence_text(cls, attachment, ai):
+        ext = Path(attachment.original_name).suffix.lower()
+
+        if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+            mime = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+            }[ext]
+            text = ai.transcribe_image_bytes(Path(attachment.file.path).read_bytes(), mime)
+            return text, {"kind": "image", "pages_processed": 1}
+
+        if ext == ".pdf":
+            reader = PdfReader(attachment.file.path)
+            embedded = "\n".join(page.extract_text() or "" for page in reader.pages)
+            if embedded.strip():
+                return embedded, {"kind": "pdf_text", "page_count": len(reader.pages), "pages_processed": len(reader.pages)}
+
+            ai._require_provider(vision=True)
+            try:
+                import fitz
+            except ImportError as exc:
+                raise RuntimeError("Scanned PDF OCR requires PyMuPDF and a vision-capable AI provider.") from exc
+
+            doc = fitz.open(attachment.file.path)
+            pages = []
+            for page_number, page in enumerate(doc[:5], start=1):
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                page_text = ai.transcribe_image_bytes(pix.tobytes("png"), "image/png")
+                if page_text and page_text.strip():
+                    pages.append(f"[PAGE {page_number}]\n{page_text.strip()}")
+            return "\n\n".join(pages), {
+                "kind": "pdf_vision",
+                "page_count": len(doc),
+                "pages_processed": min(len(doc), 5),
+            }
+
+        raise ValueError("Evidence bundle accepts PDF, PNG, JPG, JPEG or WEBP files.")
+
+    @classmethod
+    def _evidence_bundle_text(cls, attachments):
+        attachments = list(attachments)
+        if not attachments:
+            raise ValueError("No evidence files were supplied.")
+
+        ai = cls._ai_for_request(attachments[0].request)
+        sections = []
+        file_results = []
+        failures = []
+
+        for attachment in attachments:
+            try:
+                text, metadata = cls._attachment_evidence_text(attachment, ai)
+                if not (text or "").strip():
+                    raise ValueError("OCR returned no readable text.")
+                sections.append(
+                    f"===== FILE: {attachment.original_name} =====\n{text.strip()}"
+                )
+                file_results.append({
+                    "attachment_id": attachment.pk,
+                    "file_name": attachment.original_name,
+                    "status": "read",
+                    **metadata,
+                })
+            except Exception as exc:
+                failures.append({
+                    "attachment_id": attachment.pk,
+                    "file_name": attachment.original_name,
+                    "error": str(exc),
+                })
+                file_results.append({
+                    "attachment_id": attachment.pk,
+                    "file_name": attachment.original_name,
+                    "status": "warning",
+                    "error": str(exc),
+                })
+
+        if not sections:
+            detail = "; ".join(f"{item['file_name']}: {item['error']}" for item in failures)
+            raise RuntimeError(f"None of the uploaded evidence files could be read. {detail}")
+
+        return "\n\n".join(sections), file_results, failures, ai
+
+    @classmethod
+    def extract_item_form_fields_group(cls, attachments):
+        """
+        Treat multiple ID/passport files as one evidence set for a known member.
+        Front/back pages may be uploaded as separate files.
+        """
+        attachments = list(attachments)
+        bundle_text, file_results, failures, ai = cls._evidence_bundle_text(attachments)
+        row = ai.extract_form_fields_from_text(bundle_text)
+        normalized = cls._normalize_ai_row(row)
+        metadata = {
+            "method": "item_form_multi_evidence_semantic",
+            "semantic_mapping": True,
+            "source_files": [attachment.original_name for attachment in attachments],
+            "file_results": file_results,
+            "warnings": failures,
+            "ai_profile": ai.last_profile_name,
+        }
+        return file_results, [normalized], metadata
+
+    @classmethod
+    def process_initial_evidence_bundle(cls, attachments):
+        """
+        Process PDF/image files uploaded together during request creation as one
+        evidence bundle. Front/back pages can complement one another, and the
+        semantic mapper may still return multiple distinct members.
+        """
+        attachments = list(attachments)
+        if not attachments:
+            return {"processed": 0, "rows": 0, "created_items": 0, "warnings": []}
+
+        request_obj = attachments[0].request
+        try:
+            bundle_text, file_results, failures, ai = cls._evidence_bundle_text(attachments)
+            rows = [cls._normalize_ai_row(row) for row in ai.semantic_rows_from_text(bundle_text)]
+            if not rows:
+                raise ValueError("OCR evidence was read, but no member rows could be identified.")
+
+            created_items = 0
+            primary = attachments[0]
+            for row in rows:
+                values = cls._to_item_values(request_obj, row)
+                EndorsementItem.objects.create(
+                    request=request_obj,
+                    extracted_data=json_safe({
+                        "normalized": row,
+                        "source_raw": row.get("_source_raw", {}),
+                        "source_attachment_ids": [attachment.pk for attachment in attachments],
+                        "evidence_bundle": True,
+                    }),
+                    **values,
+                )
+                created_items += 1
+
+            payload = json_safe({
+                "usage": "initial_evidence_bundle",
+                "source_files": [attachment.original_name for attachment in attachments],
+                "file_results": file_results,
+                "warnings": failures,
+                "normalized_rows": rows,
+                "created_items": created_items,
+                "primary_attachment_id": primary.pk,
+            })
+            for attachment in attachments:
+                attachment.extracted_payload = {
+                    **payload,
+                    "source_file": attachment.original_name,
+                }
+                attachment.processed = True
+                attachment.processing_error = ""
+                attachment.save(update_fields=[
+                    "extracted_payload", "processed", "processing_error", "updated_at",
+                ])
+
+            return {
+                "processed": len(attachments),
+                "rows": len(rows),
+                "created_items": created_items,
+                "warnings": failures,
+            }
+        except Exception as exc:
+            for attachment in attachments:
+                attachment.processed = False
+                attachment.processing_error = str(exc)
+                attachment.save(update_fields=["processed", "processing_error", "updated_at"])
+            raise
+
+    @classmethod
+    def process_supplemental_evidence_bundle(cls, attachments):
+        """
+        Process PDF/image correction files uploaded together as one evidence
+        bundle. Front/back files are semantically merged before member upsert.
+        """
+        attachments = list(attachments)
+        if not attachments:
+            return {"processed": 0, "rows": 0, "result": {}, "warnings": []}
+
+        request_obj = attachments[0].request
+        try:
+            bundle_text, file_results, failures, ai = cls._evidence_bundle_text(attachments)
+            rows = [cls._normalize_ai_row(row) for row in ai.semantic_rows_from_text(bundle_text)]
+            if not rows:
+                raise ValueError("OCR evidence was read, but no member rows could be identified.")
+
+            primary = attachments[0]
+            result = cls._recover_items(request_obj, rows, primary)
+            payload = json_safe({
+                "usage": "supplemental_evidence_bundle",
+                "source_files": [attachment.original_name for attachment in attachments],
+                "file_results": file_results,
+                "warnings": failures,
+                "normalized_rows": rows,
+                **result,
+            })
+            for attachment in attachments:
+                attachment.extracted_payload = {
+                    **payload,
+                    "source_file": attachment.original_name,
+                }
+                attachment.processed = True
+                attachment.processing_error = ""
+                attachment.save(update_fields=[
+                    "extracted_payload", "processed", "processing_error", "updated_at",
+                ])
+            return {
+                "processed": len(attachments),
+                "rows": len(rows),
+                "result": result,
+                "warnings": failures,
+            }
+        except Exception as exc:
+            for attachment in attachments:
+                attachment.processed = False
+                attachment.processing_error = str(exc)
+                attachment.save(update_fields=["processed", "processing_error", "updated_at"])
+            raise
+
+    @classmethod
     def extract_item_form_fields(cls, attachment):
         """
         Extract one member correction form from PDF/image evidence.

@@ -33,14 +33,14 @@
         <div class="w-full max-w-2xl text-center">
           <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
           <div class="font-mono text-sm font-bold tracking-wide">DROP SOURCE FILES HERE</div>
-          <div class="mt-2 text-xs opacity-55">or choose one or more files from your computer</div>
+          <div class="mt-2 text-xs opacity-55">or choose one or more files. PDF/images selected together are treated as one evidence bundle, so ID front/back can be separate files.</div>
           <button type="button" data-browse-files class="btn btn-primary btn-sm mt-4"><i class="bi bi-folder2-open"></i>BROWSE FILES</button>
           <div data-file-count class="mt-3 text-[10px] uppercase tracking-wider opacity-45">No files selected</div>
         </div>
         <div class="se-file-list w-full"></div>
       </div>
       {{ form.attachments.errors }}
-      <div class="mt-3 flex gap-2 text-xs opacity-55"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Known columns are mapped deterministically; unfamiliar headings may use the configured AI provider.</span></div>
+      <div class="mt-3 flex gap-2 text-xs opacity-55"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Excel/CSV are parsed as structured rows; PDF/image evidence is OCR'd and semantically combined across files/pages before member extraction.</span></div>
     </div>
   </section>
 

@@ -696,6 +696,97 @@ class AIService:
                         return rows[0]
             raise
 
+    def semantic_rows_from_text(self, text):
+        """
+        Map OCR/text evidence from one or more files into one row per distinct
+        member/person. Source nomenclature and layout may vary between files.
+        """
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("OCR returned no readable text.")
+
+        mapper = self._semantic_form_mapper()
+        if not mapper:
+            raise RuntimeError(
+                "OCR text was read, but no semantic text LLM was available. "
+                "Configure an active non-vision provider or keep a suitable Ollama text model installed."
+            )
+
+        profile = mapper._profile(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+        mapper.last_profile = profile
+        admin_instructions = profile.instructions.strip() if profile and profile.instructions else ""
+        aliases = profile.field_aliases if profile and isinstance(profile.field_aliases, dict) else {}
+        examples = []
+        if profile:
+            for example in profile.examples.filter(is_active=True).order_by("sort_order", "id")[:5]:
+                examples.append({
+                    "source": example.input_text,
+                    "expected": example.expected_output,
+                })
+
+        prompt = (
+            "You are consolidating OCR/text evidence from one or more uploaded documents into insurance member rows.\n"
+            "Files/pages may be the front and back of the same ID, multiple pages of one passport, or separate documents.\n"
+            "Field names, wording, abbreviations, language, order and layout may vary. Interpret meaning semantically.\n"
+            "Combine complementary evidence that clearly belongs to the same person into ONE row. "
+            "Create separate rows only when the evidence clearly refers to different people.\n"
+            "Do not invent missing values and do not treat passport/document numbers as Civil/National IDs unless the source supports that meaning.\n"
+            "Target fields are: "
+            + ", ".join(CANONICAL_FIELDS)
+            + ". Unknown values must be null.\n"
+            "Normalize relationship to Employee, Spouse or Child only when supported; normalize gender to Male/Female when supported.\n"
+            "For plan_code, use only an insurance plan/class/category/benefit plan and match against valid policy plans when possible.\n"
+            "Policy/workflow context:\n"
+            + json.dumps(self.context or {}, ensure_ascii=False, default=str)
+            + ("\n\nAdmin extraction guidance (helpful, not exhaustive):\n" + admin_instructions if admin_instructions else "")
+            + ("\n\nAlias hints (examples only; other terminology is allowed):\n" + json.dumps(aliases, ensure_ascii=False, default=str) if aliases else "")
+            + ("\n\nFew-shot examples (patterns only; never copy values):\n" + json.dumps(examples, ensure_ascii=False, default=str) if examples else "")
+            + "\n\nEVIDENCE BUNDLE:\n"
+            + text[:60000]
+        )
+        system_prompt = (
+            "You are a semantic document-understanding engine for insurance member data. "
+            "Merge evidence across files/pages when it belongs to the same person. "
+            "Use only source-supported values and return the requested structured result."
+        )
+        response = mapper._chat(prompt, system_prompt, response_schema=MEMBER_OUTPUT_SCHEMA)
+        rows = mapper._parse_json_array(response)
+        normalized = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            result = {key: row.get(key) for key in CANONICAL_FIELDS}
+            result["plan_code"] = mapper._resolve_form_plan(result.get("plan_code"), text)
+            result["_source_raw"] = {
+                "ocr_text": text[:12000],
+                "extraction_mode": "semantic_evidence_bundle",
+                "mapper_provider": mapper.config.name if mapper.config else None,
+                "mapper_model": mapper.config.model_name if mapper.config else None,
+            }
+            normalized.append(result)
+        self.last_profile = mapper.last_profile
+        return normalized
+
+    def transcribe_image_bytes(self, content, mime="image/png"):
+        """
+        OCR/transcribe an image without requiring it to independently form a
+        complete member record. Intended for multi-file evidence bundles.
+        """
+        self._require_provider(vision=True)
+        encoded = base64.b64encode(content).decode("ascii")
+        if self.config.provider == AIProviderConfig.Provider.OLLAMA:
+            return self._vision_form_text(encoded, mime)
+
+        system = (
+            "Transcribe the visible document faithfully. Preserve labels, values, "
+            "table relationships, names, identifiers, dates and numbers. Do not infer missing values."
+        )
+        prompt = (
+            "Read this document image and return concise plain-text transcription only. "
+            "Keep the document's original terminology. Do not return JSON."
+        )
+        return self._vision(prompt, encoded, mime, system)
+
     def extract_image_rows(self, path):
         path = Path(path)
         mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
@@ -734,17 +825,7 @@ class AIService:
             if not (ocr_text or "").strip():
                 raise ValueError("OCR model returned no readable text.")
 
-            mapper_config = self._select_text_provider(exclude_pk=self.config.pk)
-            if not mapper_config or mapper_config.supports_vision:
-                raise RuntimeError(
-                    "GLM-OCR read the document, but no separate active text AI provider is configured "
-                    "to convert OCR text into strict JSON. Keep your normal Ollama text model active "
-                    "(for example qwen2.5:7b) with Supports vision disabled."
-                )
-
-            mapper = AIService(config=mapper_config, product=self.product, context=self.context)
-            rows = mapper.extract_text_rows(ocr_text)
-            self.last_profile = mapper.last_profile
+            rows = self.semantic_rows_from_text(ocr_text)
             return rows
 
         system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
