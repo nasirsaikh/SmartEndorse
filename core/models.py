@@ -400,7 +400,7 @@ class EndorsementRequest(TimeStampedModel):
 
     @property
     def sla_breached(self):
-        closed = {self.Status.COMPLETED, self.Status.CANCELLED, self.Status.REJECTED}
+        closed = {self.Status.COMPLETED, self.Status.CANCELLED}
         return bool(self.current_sla_due_at and self.status not in closed and timezone.now() > self.current_sla_due_at)
 
     def __str__(self):
