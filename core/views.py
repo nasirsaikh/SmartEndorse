@@ -890,4 +890,8 @@ def notifications_read(request):
     if request.method != "POST":
         return HttpResponse(status=405)
     request.user.portal_notifications.filter(is_read=False).update(is_read=True)
-    return HttpResponse(status=204)
+    notifications = request.user.portal_notifications.all()[:10]
+    return render(request, "partials/_notifications.html", {
+        "notifications": notifications,
+        "unread_notifications": 0,
+    })
