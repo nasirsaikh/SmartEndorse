@@ -25,7 +25,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "organization", "role", "portal_theme", "color_mode", "can_override_workflow")
+    list_display = ("user", "organization", "role", "job_title", "portal_theme", "color_mode", "can_override_workflow")
     list_filter = ("role", "organization__organization_type", "portal_theme", "color_mode")
     search_fields = ("user__username", "user__email", "organization__name")
 
@@ -140,8 +140,15 @@ class PolicyAdmin(admin.ModelAdmin):
         ("Identity", {"fields": ("policy_number", "policy_name", "product", "insurer", "client", "tpa", "is_active")}),
         ("Distribution", {"fields": ("broker_code", "agent_code", "channel_code")}),
         ("Period & pricing", {"fields": ("effective_from", "effective_to", "endorsement_expiry_cutoff_days", "currency", "rating_method", "rating_parameters", "day_count_basis", "allow_backdated_days")}),
-        ("Automation rules", {"fields": ("auto_stp", "required_fields_addition", "required_fields_deletion", "mandatory_documents_addition", "mandatory_documents_deletion")}),
-        ("SLA", {"fields": ("insurer_sla", "tpa_sla", "client_query_sla")}),
+        ("Automation rules", {
+            "fields": ("auto_stp", "auto_approval_rules", "required_fields_addition", "required_fields_deletion", "mandatory_documents_addition", "mandatory_documents_deletion"),
+            "description": (
+                "Auto approval rules are optional JSON. Example: "
+                '{"min_validation_score": 95, "max_abs_premium_impact": 500, "block_on_risk_flags": true}. '
+                "When a rule fails or a risk/fraud flag is detected, SmartEndorse creates an insurer review instead of auto-approving."
+            ),
+        }),
+        ("SLA", {"fields": ("intake_sla", "validation_sla", "insurer_sla", "tpa_sla", "client_query_sla")}),
     )
 
 
