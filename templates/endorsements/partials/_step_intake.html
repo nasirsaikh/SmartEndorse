@@ -18,6 +18,7 @@
     </div>
   </section>
 
+  {% include "endorsements/partials/_source_json.html" %}
   {% include "endorsements/partials/_validation_issues.html" %}
   {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=True show_tpa_controls=False %}
 
@@ -65,12 +66,37 @@
 
   {% if resolution_rows %}
   <section class="se-panel">
-    <div class="se-panel-head"><div><div class="se-eyebrow">Correction ledger</div><div class="se-panel-title mt-1">RESOLVED / CHANGED RECORDS</div></div></div>
-    <div class="overflow-x-auto">
-      <table class="se-table">
-        <thead><tr><th>When</th><th>Action</th><th>Before / source</th><th>After / filled</th></tr></thead>
-        <tbody>{% for row in resolution_rows %}<tr><td class="mono">{{ row.created_at|date:"d M H:i" }}</td><td>{{ row.description }}</td><td>{{ row.before_or_source }}</td><td>{{ row.after_or_filled }}</td></tr>{% endfor %}</tbody>
-      </table>
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Correction ledger</div><div class="se-panel-title mt-1">UNIFIED BEFORE → AFTER CHANGES</div></div>
+      <span class="badge badge-ghost badge-sm">{{ resolution_rows|length }} CHANGE SET{{ resolution_rows|length|pluralize|upper }}</span>
+    </div>
+    <div class="divide-y divide-base-content/10">
+      {% for row in resolution_rows %}
+      <div class="p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <strong class="text-xs">{{ row.description }}</strong>
+            {% if row.actor %}<span class="ml-2 text-[10px] opacity-45">by {{ row.actor.get_full_name|default:row.actor.username }}</span>{% endif %}
+          </div>
+          <span class="font-mono text-[10px] opacity-45">{{ row.created_at|date:"d M Y H:i" }}</span>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+          <table class="se-table">
+            <thead><tr><th>Field</th><th>Before</th><th></th><th>After</th></tr></thead>
+            <tbody>
+            {% for change in row.changes %}
+            <tr>
+              <td><strong>{{ change.field }}</strong></td>
+              <td class="mono opacity-55">{{ change.before }}</td>
+              <td class="w-8 text-center"><i class="bi bi-arrow-right text-primary"></i></td>
+              <td class="mono font-semibold">{{ change.after }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
     </div>
   </section>
   {% endif %}
