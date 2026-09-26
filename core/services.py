@@ -270,26 +270,44 @@ class FileIntakeService:
         return attachment.processed
 
     @classmethod
+    def _ai_for_request(cls, request_obj):
+        policy = request_obj.policy
+        context = {
+            "product": policy.get_product_display(),
+            "policy_number": policy.policy_number,
+            "policy_name": policy.policy_name,
+            "endorsement_type": request_obj.get_endorsement_type_display(),
+            "effective_date": request_obj.effective_date.isoformat() if request_obj.effective_date else None,
+            "valid_plans": list(
+                policy.plans.filter(is_active=True)
+                .order_by("code")
+                .values("code", "name", "sum_assured")
+            ),
+        }
+        return AIService(product=policy.product, context=context)
+
+    @classmethod
     def _extract(cls, attachment):
         ext = Path(attachment.original_name).suffix.lower()
+        ai = cls._ai_for_request(attachment.request)
         if ext == ".xlsx":
             raw = cls._xlsx_rows(attachment.file.path)
-            normalized, ai_used = cls._normalize_structured(raw)
-            return raw, normalized, {"method": "xlsx", "ai_header_mapping": ai_used}
+            normalized, ai_used = cls._normalize_structured(raw, ai)
+            return raw, normalized, {"method": "xlsx", "ai_header_mapping": ai_used, "ai_profile": ai.last_profile_name if ai_used else None}
         if ext == ".xls":
             raw = cls._xls_rows(attachment.file.path)
-            normalized, ai_used = cls._normalize_structured(raw)
-            return raw, normalized, {"method": "xls", "ai_header_mapping": ai_used}
+            normalized, ai_used = cls._normalize_structured(raw, ai)
+            return raw, normalized, {"method": "xls", "ai_header_mapping": ai_used, "ai_profile": ai.last_profile_name if ai_used else None}
         if ext == ".csv":
             raw = cls._csv_rows(attachment.file.path)
-            normalized, ai_used = cls._normalize_structured(raw)
-            return raw, normalized, {"method": "csv", "ai_header_mapping": ai_used}
+            normalized, ai_used = cls._normalize_structured(raw, ai)
+            return raw, normalized, {"method": "csv", "ai_header_mapping": ai_used, "ai_profile": ai.last_profile_name if ai_used else None}
         if ext == ".pdf":
-            return cls._pdf_rows(attachment.file.path)
+            return cls._pdf_rows(attachment.file.path, ai)
         if ext in {".png", ".jpg", ".jpeg", ".webp"}:
-            rows = AIService().extract_image_rows(attachment.file.path)
+            rows = ai.extract_image_rows(attachment.file.path)
             normalized = [cls._normalize_ai_row(r) for r in rows]
-            return [r.get("_source_raw", r) for r in rows], normalized, {"method": "vision"}
+            return [r.get("_source_raw", r) for r in rows], normalized, {"method": "vision", "ai_profile": ai.last_profile_name}
         raise ValueError("Unsupported file type. Use XLSX, XLS, CSV, PDF, PNG, JPG, JPEG or WEBP.")
 
     @classmethod
@@ -326,29 +344,39 @@ class FileIntakeService:
             return [json_safe(row) for row in csv.DictReader(handle) if any(v not in (None, "") for v in row.values())]
 
     @classmethod
-    def _pdf_rows(cls, path):
+    def _pdf_rows(cls, path, ai=None):
+        ai = ai or AIService()
         reader = PdfReader(path)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
         if text.strip():
-            rows = AIService().extract_text_rows(text)
+            rows = ai.extract_text_rows(text)
             normalized = [cls._normalize_ai_row(r) for r in rows]
-            return [r.get("_source_raw", r) for r in rows], normalized, {"method": "pdf_text_ai", "page_count": len(reader.pages)}
-        ai = AIService()
+            return [r.get("_source_raw", r) for r in rows], normalized, {
+                "method": "pdf_text_ai",
+                "page_count": len(reader.pages),
+                "ai_profile": ai.last_profile_name,
+            }
+
         ai._require_provider(vision=True)
         try:
             import fitz
         except ImportError as exc:
             raise RuntimeError("Scanned PDF OCR requires PyMuPDF and a vision-capable AI provider.") from exc
+
         doc = fitz.open(path)
         all_rows = []
         for page in doc:
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
             all_rows.extend(ai.extract_image_bytes(pix.tobytes("png"), "image/png"))
         normalized = [cls._normalize_ai_row(r) for r in all_rows]
-        return [r.get("_source_raw", r) for r in all_rows], normalized, {"method": "pdf_vision_ocr", "page_count": len(doc)}
+        return [r.get("_source_raw", r) for r in all_rows], normalized, {
+            "method": "pdf_vision_ocr",
+            "page_count": len(doc),
+            "ai_profile": ai.last_profile_name,
+        }
 
     @classmethod
-    def _normalize_structured(cls, raw_rows):
+    def _normalize_structured(cls, raw_rows, ai=None):
         deterministic = []
         unknown_headers = set()
         for raw in raw_rows:
@@ -361,9 +389,10 @@ class FileIntakeService:
                     unknown_headers.add(str(key))
             deterministic.append(cls._normalize_ai_row(mapped))
 
-        if unknown_headers and AIService().available:
+        ai = ai or AIService()
+        if unknown_headers and ai.available:
             try:
-                ai_rows = [cls._normalize_ai_row(r) for r in AIService().normalize_structured_rows(raw_rows)]
+                ai_rows = [cls._normalize_ai_row(r) for r in ai.normalize_structured_rows(raw_rows)]
                 merged = []
                 for index, deterministic_row in enumerate(deterministic):
                     ai_row = ai_rows[index] if index < len(ai_rows) else {}

@@ -49,7 +49,7 @@ class StyledFormMixin:
                 "input", "select", "textarea", "input-bordered", "select-bordered", "textarea-bordered",
             }]
             if isinstance(field.widget, forms.Select):
-                classes.extend(["select", "select-bordered", "w-full", "searchable-select"])
+                classes.extend(["select", "select-bordered", "w-full"])
             elif isinstance(field.widget, forms.CheckboxInput):
                 classes.extend(["checkbox", "checkbox-sm"])
             elif isinstance(field.widget, forms.Textarea):
@@ -85,10 +85,9 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
     def __init__(self, *args, policies=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["policy"].queryset = policies if policies is not None else Policy.objects.none()
-        self.fields["policy"].empty_label = "Search and select policy"
+        self.fields["policy"].empty_label = "Select policy"
         self.fields["policy"].widget.attrs.update({
             "hx-get": "/policy-plans/", "hx-target": "#id_plan", "hx-trigger": "change",
-            "data-placeholder": "Search policy...",
         })
         policy_id = self.data.get("policy") or self.initial.get("policy")
         if policy_id:

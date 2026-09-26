@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 
 from .models import (
-    AIProviderConfig, Attachment, EndorsementApproval, EndorsementItem, EndorsementQuery,
+    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementQuery,
     EndorsementRequest, IntegrationEndpoint, Organization, PlatformConfiguration,
     Policy, PolicyAccess, PolicyMember, PolicyPlan, PortalNotification, RecoveryUpload, SLAProfile,
     UserProfile, WorkflowEvent,
@@ -55,6 +55,40 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
         if obj.is_active:
             AIProviderConfig.objects.exclude(pk=obj.pk).update(is_active=False)
         super().save_model(request, obj, form, change)
+
+
+class AITrainingExampleInline(admin.StackedInline):
+    model = AITrainingExample
+    extra = 0
+    fields = ("name", "input_text", "expected_output", "sort_order", "is_active")
+    ordering = ("sort_order", "id")
+
+
+@admin.register(AIExtractionProfile)
+class AIExtractionProfileAdmin(admin.ModelAdmin):
+    list_display = ("name", "task", "product_scope", "priority", "example_count", "is_active", "updated_at")
+    list_filter = ("task", "product", "is_active")
+    search_fields = ("name", "instructions", "system_prompt")
+    ordering = ("-priority", "name")
+    inlines = [AITrainingExampleInline]
+    fieldsets = (
+        ("Profile", {"fields": ("name", "task", "product", "priority", "is_active")}),
+        ("Prompt training", {
+            "fields": ("system_prompt", "instructions", "field_aliases"),
+            "description": (
+                "These settings control prompt-based training used for OCR/document extraction. "
+                "Use Training Examples below for few-shot examples. This does not fine-tune model weights."
+            ),
+        }),
+    )
+
+    @admin.display(description="Scope")
+    def product_scope(self, obj):
+        return obj.get_product_display() if obj.product else "Global"
+
+    @admin.display(description="Examples")
+    def example_count(self, obj):
+        return obj.examples.filter(is_active=True).count()
 
 
 @admin.register(SLAProfile)
