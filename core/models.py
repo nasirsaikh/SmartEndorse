@@ -83,6 +83,7 @@ class UserProfile(TimeStampedModel):
     role = models.CharField(max_length=30, choices=Role.choices)
     job_title = models.CharField(max_length=120, blank=True)
     phone = models.CharField(max_length=40, blank=True)
+    photo = models.ImageField(upload_to="profiles/%Y/%m/", blank=True, null=True)
     can_override_workflow = models.BooleanField(default=False)
     portal_theme = models.CharField(max_length=30, choices=BOOTSWATCH_THEMES, default="default")
     color_mode = models.CharField(max_length=10, choices=ColorMode.choices, default=ColorMode.AUTO)
@@ -429,6 +430,7 @@ class EndorsementItem(TimeStampedModel):
     prorata_factor = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0.000000"))
     premium_impact = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
     card_number = models.CharField(max_length=100, blank=True)
+    tpa_effective_date = models.DateField(null=True, blank=True)
     tpa_premium_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
 
     def __str__(self):
