@@ -175,6 +175,58 @@ class AIService:
             return "https://api.anthropic.com"
         raise RuntimeError("base_url is required for OpenAI-compatible providers.")
 
+    def _post_json(self, url, payload):
+        try:
+            with httpx.Client(timeout=self.config.timeout_seconds) as client:
+                response = client.post(url, headers=self._headers(), json=payload)
+        except httpx.ConnectError as exc:
+            raise RuntimeError(
+                f"Cannot connect to AI provider {self.config.name} at {self._base_url()}. "
+                "Confirm the service is running and the Base URL is correct."
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                f"AI provider {self.config.name} timed out after {self.config.timeout_seconds} seconds."
+            ) from exc
+
+        if response.is_error:
+            detail = ""
+            try:
+                body = response.json()
+                if isinstance(body, dict):
+                    detail = str(body.get("error") or body.get("message") or body.get("detail") or "").strip()
+            except Exception:
+                body = None
+            if not detail:
+                detail = (response.text or "").strip()[:500]
+
+            if self.config.provider == AIProviderConfig.Provider.OLLAMA and response.status_code == 404:
+                hint = (
+                    f" Check that model '{self.config.model_name}' is installed with "
+                    f"'ollama list' and 'ollama pull {self.config.model_name}'. "
+                    "For Qwen2.5-VL, Ollama 0.7.0 or newer is required."
+                )
+                if detail:
+                    raise RuntimeError(
+                        f"Ollama returned HTTP 404 for model '{self.config.model_name}': {detail}.{hint}"
+                    )
+                raise RuntimeError(
+                    f"Ollama returned HTTP 404 from {url}.{hint} "
+                    "If the model is installed, update Ollama and confirm that http://127.0.0.1:11434/api/tags responds."
+                )
+
+            detail_suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"AI provider {self.config.name} returned HTTP {response.status_code}{detail_suffix}"
+            )
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"AI provider {self.config.name} returned a non-JSON response from {url}."
+            ) from exc
+
     def _chat(self, prompt, system_prompt=""):
         cfg = self.config
         base = self._base_url()
@@ -212,8 +264,7 @@ class AIService:
                 "messages": messages,
             }
 
-        with httpx.Client(timeout=cfg.timeout_seconds) as client:
-            data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
+        data = self._post_json(url, payload)
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
             return data["message"]["content"]
         if cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
@@ -257,8 +308,7 @@ class AIService:
                 "messages": messages,
             }
 
-        with httpx.Client(timeout=cfg.timeout_seconds) as client:
-            data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
+        data = self._post_json(url, payload)
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
             return data["message"]["content"]
         if cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
