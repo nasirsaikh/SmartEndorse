@@ -412,6 +412,49 @@ def request_detail(request, pk):
 
 
 @login_required
+def retry_failed_evidence_bundle(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.error(request, "Failed documents can only be retried while the endorsement is in validation/correction.")
+        return redirect("endorsement_detail", pk=pk)
+
+    failed = [
+        attachment for attachment in endorsement.attachments.exclude(processing_error="")
+        if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+    ]
+    if not failed:
+        messages.info(request, "There are no failed PDF/image documents to retry.")
+        return redirect("endorsement_detail", pk=pk)
+
+    try:
+        if endorsement.items.exists():
+            result = FileIntakeService.process_supplemental_evidence_bundle(failed)
+        else:
+            result = FileIntakeService.process_initial_evidence_bundle(failed)
+
+        WorkflowService.revalidate_after_correction(endorsement, request.user)
+        messages.success(
+            request,
+            f"{result['processed']} failed document(s) were retried together as one evidence bundle; "
+            f"{result['rows']} member row(s) were identified.",
+        )
+    except Exception as exc:
+        logger.exception("Failed evidence bundle retry failed for endorsement %s", endorsement.pk)
+        messages.error(request, f"Failed document bundle could not be recovered: {exc}")
+
+    return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
 def revalidate_request(request, pk):
     if request.method != "POST":
         return HttpResponse(status=405)
