@@ -242,6 +242,8 @@ class QueryForm(StyledFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["subject"].widget.attrs["placeholder"] = "Example: Missing Civil ID"
+        self.fields["message"].widget.attrs["placeholder"] = "Explain what is missing or incorrect and exactly what the requester should provide."
         self.apply_bootstrap()
 
 
