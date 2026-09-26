@@ -99,13 +99,26 @@ class Command(BaseCommand):
                 "currency": "OMR",
                 "rating_method": Policy.RatingMethod.PER_MILLE_SUM_ASSURED,
                 "rating_parameters": {"rate_per_mille": "1.25", "prorata_mode": "fixed_basis"},
-                "required_fields_addition": ["full_name", "date_of_birth", "gender", "sum_assured"],
+                "required_fields_addition": ["full_name", "date_of_birth", "gender", "plan", "sum_assured"],
                 "required_fields_deletion": ["member_no", "effective_date"],
                 "day_count_basis": 365,
                 "auto_stp": True,
                 "insurer_sla": sla_insurer,
                 "client_query_sla": sla_query,
             },
+        )
+
+        PolicyPlan.objects.update_or_create(
+            policy=life, code="LIFE25",
+            defaults={"name": "Life 25K", "annual_rate": Decimal("0.000"), "sum_assured": Decimal("25000.000")},
+        )
+        PolicyPlan.objects.update_or_create(
+            policy=life, code="LIFE50",
+            defaults={"name": "Life 50K", "annual_rate": Decimal("0.000"), "sum_assured": Decimal("50000.000")},
+        )
+        PolicyPlan.objects.update_or_create(
+            policy=life, code="LIFE100",
+            defaults={"name": "Life 100K", "annual_rate": Decimal("0.000"), "sum_assured": Decimal("100000.000")},
         )
 
         for policy in (medical, life):

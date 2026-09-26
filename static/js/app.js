@@ -106,11 +106,54 @@
     });
   }
 
+  async function updatePlanSumAssured(select) {
+    if (!select?.dataset.planSumAssured) return;
+    const target = document.querySelector('[data-plan-sum-target="true"]');
+    if (!target) return;
+    const planId = select.value;
+    target.value = "";
+    if (!planId) {
+      target.placeholder = "Select a plan";
+      return;
+    }
+    try {
+      const url = new URL(select.dataset.planSumUrl || "/policy-plans/sum-assured/", window.location.origin);
+      url.searchParams.set("plan", planId);
+      const response = await fetch(url, {headers: {"X-Requested-With": "XMLHttpRequest"}});
+      if (!response.ok) throw new Error("Plan lookup failed");
+      const data = await response.json();
+      target.value = data.sum_assured ?? "";
+      target.placeholder = data.sum_assured ? "" : "Not configured for this plan";
+    } catch (_) {
+      target.value = "";
+      target.placeholder = "Unable to load plan sum assured";
+    }
+  }
+
+  function initPlanSumAssured(root = document) {
+    const selects = [];
+    if (root.matches?.('select[data-plan-sum-assured="true"]')) selects.push(root);
+    root.querySelectorAll?.('select[data-plan-sum-assured="true"]').forEach(el => selects.push(el));
+    selects.forEach(select => {
+      if (select.dataset.planSumReady === "1") return;
+      select.dataset.planSumReady = "1";
+      select.addEventListener("change", () => updatePlanSumAssured(select));
+      if (select.value) updatePlanSumAssured(select);
+    });
+  }
+
   function initSelects(root = document) {
-    root.querySelectorAll("select.searchable-select").forEach(select => {
+    const selects = [];
+    if (root.matches?.("select.searchable-select")) selects.push(root);
+    root.querySelectorAll?.("select.searchable-select").forEach(select => selects.push(select));
+
+    selects.forEach(select => {
       if (select.tomselect) {
-        try { select.tomselect.sync(); } catch (_) {}
-        return;
+        if (root === select) {
+          try { select.tomselect.destroy(); } catch (_) {}
+        } else {
+          return;
+        }
       }
       new TomSelect(select, {
         create: false,
@@ -118,6 +161,10 @@
         maxOptions: 500,
         plugins: ["dropdown_input"],
         placeholder: select.dataset.placeholder || "Search…",
+        closeAfterSelect: true,
+        onChange() {
+          if (select.dataset.planSumAssured === "true") updatePlanSumAssured(select);
+        },
         onDropdownOpen() {
           this.positionDropdown();
         }
@@ -186,7 +233,36 @@
     const theme = resolveTheme(choice);
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.dataset.themePreference = choice;
+    updateThemeIcon();
     syncPlotlyTheme();
+  }
+
+  function updateThemeIcon() {
+    const icon = document.getElementById("theme-toggle-icon");
+    if (!icon) return;
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    icon.className = dark ? "bi bi-sun text-lg" : "bi bi-moon-stars text-lg";
+  }
+
+  async function toggleTheme() {
+    const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    const next = current === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      const body = new URLSearchParams({color_mode: next});
+      const response = await fetch("/preferences/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "X-CSRFToken": decodeURIComponent(getCookie("csrftoken")),
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body
+      });
+      if (!response.ok) throw new Error("Could not save theme");
+    } catch (_) {
+      showToast("Theme changed locally", "The visual mode changed, but the preference could not be saved.", "warning");
+    }
   }
 
   function syncPlotlyTheme() {
@@ -236,7 +312,9 @@
   function initialize(root = document) {
     initDropzones(root);
     initSelects(root);
+    initPlanSumAssured(root);
     notifyNewPortalItems(root);
+    updateThemeIcon();
     setTimeout(syncPlotlyTheme, 50);
   }
 
@@ -262,14 +340,15 @@
   });
   document.addEventListener("htmx:afterSwap", event => initialize(event.detail.target || document));
 
-  document.addEventListener("DOMContentLoaded", () => initialize(document));
-
-  document.body?.addEventListener("htmx:afterRequest", event => {
-    if (event.detail.elt?.id === "appearance-form" && event.detail.successful) {
-      const choice = document.getElementById("color-mode-select")?.value || "auto";
-      applyTheme(choice);
-      showToast("Theme updated", `Using ${resolveTheme(choice)} mode.`);
-    }
+  document.addEventListener("DOMContentLoaded", () => {
+    initialize(document);
+    document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
+    document.querySelectorAll(".drawer-side a").forEach(link => {
+      link.addEventListener("click", () => {
+        const drawer = document.getElementById("portal-drawer");
+        if (drawer) drawer.checked = false;
+      });
+    });
   });
 
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {

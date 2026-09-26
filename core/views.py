@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Sum
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -17,7 +17,7 @@ from .access import (
 )
 from .forms import (
     ApprovalDecisionForm, BulkRecoveryForm, EndorsementCreateForm, EndorsementItemCorrectionForm,
-    QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
+    ItemOCRFillForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
 )
 from .models import (
     Attachment, BOOTSWATCH_THEMES, EndorsementApproval, EndorsementItem,
@@ -93,18 +93,65 @@ def dashboard(request):
 
 @login_required
 def request_list(request):
-    qs = accessible_endorsements(request.user).order_by("-created_at")
-    status, product, q = request.GET.get("status", ""), request.GET.get("product", ""), request.GET.get("q", "").strip()
+    base_qs = accessible_endorsements(request.user)
+    status = request.GET.get("status", "")
+    product = request.GET.get("product", "")
+    endorsement_type = request.GET.get("type", "")
+    q = request.GET.get("q", "").strip()
+
+    total = base_qs.count()
+    completed = base_qs.filter(status=EndorsementRequest.Status.COMPLETED).count()
+    needs_info = base_qs.filter(status__in=[EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY]).count()
+    pending_approval = base_qs.filter(status__in=[
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+    ]).count()
+    breached = sum(
+        1 for item in base_qs.exclude(current_sla_due_at=None).exclude(status=EndorsementRequest.Status.COMPLETED)
+        if item.sla_breached
+    )
+    premium = base_qs.aggregate(total=Sum("premium_impact"))["total"] or 0
+
+    qs = base_qs.order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
     if product:
         qs = qs.filter(policy__product=product)
+    if endorsement_type:
+        qs = qs.filter(endorsement_type=endorsement_type)
     if q:
-        qs = qs.filter(Q(reference__icontains=q) | Q(policy__policy_number__icontains=q) | Q(policy__client__name__icontains=q) | Q(items__full_name__icontains=q)).distinct()
+        qs = qs.filter(
+            Q(reference__icontains=q)
+            | Q(policy__policy_number__icontains=q)
+            | Q(policy__policy_name__icontains=q)
+            | Q(policy__client__name__icontains=q)
+            | Q(requester_organization__name__icontains=q)
+            | Q(external_reference__icontains=q)
+            | Q(items__full_name__icontains=q)
+            | Q(items__member_no__icontains=q)
+            | Q(items__employee_no__icontains=q)
+            | Q(items__national_id__icontains=q)
+        ).distinct()
+
     context = {
-        "endorsements": qs[:200], "status_choices": EndorsementRequest.Status.choices,
-        "product_choices": Policy.Product.choices, "selected_status": status, "selected_product": product,
-        "q": q, "can_create": can_create_endorsement(request.user),
+        "endorsements": qs[:200],
+        "status_choices": EndorsementRequest.Status.choices,
+        "product_choices": Policy.Product.choices,
+        "type_choices": EndorsementRequest.Type.choices,
+        "selected_status": status,
+        "selected_product": product,
+        "selected_type": endorsement_type,
+        "q": q,
+        "can_create": can_create_endorsement(request.user),
+        "pipeline_kpis": {
+            "total": total,
+            "open": total - completed,
+            "completed": completed,
+            "needs_info": needs_info,
+            "pending_approval": pending_approval,
+            "breached": breached,
+            "premium": premium,
+        },
     }
     return render(request, "endorsements/_table.html" if getattr(request, "htmx", False) else "endorsements/list.html", context)
 
@@ -119,6 +166,20 @@ def policy_plans(request):
     for plan in plans:
         options.append(f'<option value="{plan.pk}">{plan.code} - {plan.name}</option>')
     return HttpResponse("".join(options))
+
+
+@login_required
+def policy_plan_sum_assured(request):
+    plan_id = request.GET.get("plan")
+    if not plan_id:
+        return JsonResponse({"sum_assured": None})
+    plan = PolicyPlan.objects.filter(pk=plan_id, policy__in=accessible_policies(request.user), is_active=True).first()
+    if not plan:
+        return JsonResponse({"sum_assured": None}, status=404)
+    return JsonResponse({
+        "sum_assured": str(plan.sum_assured) if plan.sum_assured is not None else None,
+        "plan": f"{plan.code} - {plan.name}",
+    })
 
 
 @login_required
@@ -249,7 +310,10 @@ def request_detail(request, pk):
 
     resolution_rows = []
     for event in endorsement.events.filter(
-        event_type__in=["ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED", "BULK_ITEM_RECOVERED"]
+        event_type__in=[
+            "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "SUPPLEMENTAL_ROW_CREATED",
+            "BULK_ITEM_RECOVERED", "VALIDATION_ROW_CREATED", "VALIDATION_ITEM_DELETED",
+        ]
     ):
         payload = event.payload if isinstance(event.payload, dict) else {}
         resolution_rows.append({
@@ -266,6 +330,9 @@ def request_detail(request, pk):
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
         "resolution_rows": resolution_rows,
         "can_edit": can_edit_request(request.user, endorsement),
+        "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
+            EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
+        },
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
@@ -276,19 +343,146 @@ def edit_item(request, pk, item_id):
     endorsement = _get_accessible_request(request.user, pk)
     if not can_edit_request(request.user, endorsement):
         raise PermissionDenied
-    item = get_object_or_404(endorsement.items, pk=item_id)
+    item = get_object_or_404(endorsement.items.select_related("plan", "request__policy"), pk=item_id)
+    ocr_form = ItemOCRFillForm()
+    ocr_source = None
+    ocr_preview = None
+
+    if request.method == "POST" and request.POST.get("action") == "ocr_fill":
+        ocr_form = ItemOCRFillForm(request.POST, request.FILES)
+        form = EndorsementItemCorrectionForm(instance=item)
+        if ocr_form.is_valid():
+            upload = ocr_form.cleaned_data["ocr_file"]
+            attachment = Attachment.objects.create(
+                request=endorsement,
+                file=upload,
+                original_name=upload.name,
+                kind=FileIntakeService.kind_for_name(upload.name),
+                is_supplemental=True,
+            )
+            try:
+                raw_rows, normalized_rows, metadata = FileIntakeService._extract(attachment)
+                target_row = None
+                if len(normalized_rows) == 1:
+                    target_row = normalized_rows[0]
+                else:
+                    for row in normalized_rows:
+                        matched, _, _ = FileIntakeService._candidate_match(endorsement, row)
+                        if matched and matched.pk == item.pk:
+                            target_row = row
+                            break
+                if not target_row:
+                    raise ValueError("The document contains multiple members or could not be matched uniquely to this item.")
+
+                values = FileIntakeService._to_item_values(endorsement, target_row)
+                initial = {
+                    "member_no": item.member_no,
+                    "employee_no": item.employee_no,
+                    "national_id": item.national_id,
+                    "full_name": item.full_name,
+                    "relationship": item.relationship,
+                    "date_of_birth": item.date_of_birth,
+                    "gender": item.gender,
+                    "plan": item.plan_id,
+                    "sum_assured": item.sum_assured,
+                    "effective_date": item.effective_date,
+                }
+                for field in initial:
+                    value = values.get(field)
+                    if value not in (None, ""):
+                        initial[field] = value.pk if field == "plan" and value else value
+                if values.get("plan"):
+                    initial["sum_assured"] = values["plan"].sum_assured
+
+                form = EndorsementItemCorrectionForm(instance=item, initial=initial)
+                attachment.extracted_payload = json_safe({
+                    "source_file": attachment.original_name,
+                    "raw_rows": raw_rows,
+                    "normalized_rows": normalized_rows,
+                    **metadata,
+                    "ocr_fill_target_item": item.pk,
+                })
+                attachment.processed = True
+                attachment.processing_error = ""
+                attachment.save(update_fields=["extracted_payload", "processed", "processing_error", "updated_at"])
+                WorkflowEvent.objects.create(
+                    request=endorsement,
+                    actor=request.user,
+                    event_type="ITEM_OCR_PREVIEW",
+                    description=f"OCR extracted correction values for item {item.pk} from {attachment.original_name}.",
+                    payload={"item_id": item.pk, "source": attachment.original_name, "extracted": json_safe(values)},
+                )
+                ocr_source = attachment.original_name
+                ocr_preview = values
+                messages.info(request, "OCR values were extracted into the form. Review them, then click Save & revalidate.")
+            except Exception as exc:
+                attachment.processing_error = str(exc)
+                attachment.processed = False
+                attachment.save(update_fields=["processing_error", "processed", "updated_at"])
+                messages.error(request, f"OCR extraction failed: {exc}")
+        return render(request, "endorsements/item_edit.html", {
+            "endorsement": endorsement, "item": item, "form": form, "ocr_form": ocr_form,
+            "ocr_source": ocr_source, "ocr_preview": ocr_preview,
+        })
+
     if request.method == "POST":
-        before = {f: json_safe(getattr(item, f)) for f in ["member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "annual_salary", "sum_assured", "effective_date"]}
+        before = {
+            f: json_safe(getattr(item, f + "_id") if f == "plan" else getattr(item, f))
+            for f in ["member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "plan", "sum_assured", "effective_date"]
+        }
         form = EndorsementItemCorrectionForm(request.POST, instance=item)
         if form.is_valid():
             item = form.save()
-            WorkflowEvent.objects.create(request=endorsement, actor=request.user, event_type="ITEM_MANUALLY_CORRECTED", description=f"Item {item.pk} corrected manually.", payload={"item_id": item.pk, "before": before, "after": {k: json_safe(v) for k, v in form.cleaned_data.items()}})
+            WorkflowEvent.objects.create(
+                request=endorsement,
+                actor=request.user,
+                event_type="ITEM_MANUALLY_CORRECTED",
+                description=f"Item {item.pk} corrected manually.",
+                payload={"item_id": item.pk, "before": before, "after": {k: json_safe(v) for k, v in form.cleaned_data.items()}},
+            )
             WorkflowService.revalidate_after_correction(endorsement, request.user)
-            messages.success(request, "Item updated and the case was revalidated.")
+            messages.success(request, "Item updated and the endorsement was revalidated.")
             return redirect("endorsement_detail", pk=pk)
     else:
         form = EndorsementItemCorrectionForm(instance=item)
-    return render(request, "endorsements/item_edit.html", {"endorsement": endorsement, "item": item, "form": form})
+
+    return render(request, "endorsements/item_edit.html", {
+        "endorsement": endorsement, "item": item, "form": form, "ocr_form": ocr_form,
+        "ocr_source": ocr_source, "ocr_preview": ocr_preview,
+    })
+
+
+@login_required
+def delete_item(request, pk, item_id):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO}:
+        messages.error(request, "Member rows can only be deleted while the endorsement is in validation.")
+        return redirect("endorsement_detail", pk=pk)
+
+    item = get_object_or_404(endorsement.items, pk=item_id)
+    snapshot = {
+        "item_id": item.pk,
+        "member_no": item.member_no,
+        "employee_no": item.employee_no,
+        "national_id": item.national_id,
+        "full_name": item.full_name,
+    }
+    deleted_id = item.pk
+    item.delete()
+    WorkflowEvent.objects.create(
+        request=endorsement,
+        actor=request.user,
+        event_type="VALIDATION_ITEM_DELETED",
+        description=f"Item {deleted_id} deleted during validation.",
+        payload=snapshot,
+    )
+    WorkflowService.revalidate_after_correction(endorsement, request.user)
+    messages.success(request, f"Member row {deleted_id} deleted and the endorsement was revalidated.")
+    return redirect("endorsement_detail", pk=pk)
 
 
 @login_required
@@ -300,8 +494,8 @@ def supplemental_upload(request, pk):
     if not can_edit_request(request.user, endorsement):
         messages.error(request, "You do not have permission to correct this endorsement.")
         return redirect("endorsement_detail", pk=pk)
-    if endorsement.status != EndorsementRequest.Status.NEEDS_INFO:
-        messages.warning(request, "Supplemental correction is only available while this endorsement needs information.")
+    if endorsement.status not in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY}:
+        messages.warning(request, "Validation correction is only available while this endorsement is waiting for corrected information.")
         return redirect("endorsement_detail", pk=pk)
 
     form = SupplementalUploadForm(request.POST, request.FILES)
@@ -331,17 +525,13 @@ def supplemental_upload(request, pk):
         if failures:
             text = "; ".join(failures)
             if processed:
-                messages.warning(
-                    request,
-                    f"{processed} supplemental file(s) were processed for {endorsement.reference}, but some failed: {text}",
-                )
+                messages.warning(request, f"{processed} validation file(s) were processed, but some failed: {text}")
             else:
-                messages.error(request, f"Supplemental upload failed for {endorsement.reference}: {text}")
+                messages.error(request, f"Validation upload failed for {endorsement.reference}: {text}")
         else:
             messages.success(
                 request,
-                f"{processed} supplemental file(s) processed for {endorsement.reference}. "
-                "Unique rows were matched and missing fields were filled where possible.",
+                f"{processed} validation file(s) processed. Existing uniquely matched rows were updated and new unmatched members were added safely.",
             )
     except Exception as exc:
         logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)

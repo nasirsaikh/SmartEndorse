@@ -166,7 +166,13 @@ class WorkflowEventAdmin(admin.ModelAdmin):
     readonly_fields = ("request", "event_type", "from_status", "to_status", "actor", "description", "payload", "created_at", "updated_at")
 
 
-admin.site.register(PolicyPlan)
+@admin.register(PolicyPlan)
+class PolicyPlanAdmin(admin.ModelAdmin):
+    list_display = ("policy", "code", "name", "annual_rate", "sum_assured", "is_active")
+    list_filter = ("policy__product", "is_active")
+    search_fields = ("policy__policy_number", "code", "name")
+
+
 admin.site.register(PolicyAccess)
 admin.site.register(IntegrationEndpoint)
 admin.site.site_header = "SmartEndorse Administration"
