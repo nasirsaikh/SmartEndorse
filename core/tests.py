@@ -151,7 +151,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
             HTTP_HX_TARGET="request-table",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "REFERENCE")
+        self.assertContains(response, "Reference")
         self.assertNotContains(response, "SEARCH & SEGMENT REQUESTS")
         self.assertNotContains(response, "Global search: request, policy, client, member, Civil ID")
 
