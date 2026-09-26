@@ -416,6 +416,73 @@ class FileIntakeService:
         return file_results, [normalized], metadata
 
     @classmethod
+    def process_initial_evidence_bundle(cls, attachments):
+        """
+        Process PDF/image files uploaded together during request creation as one
+        evidence bundle. Front/back pages can complement one another, and the
+        semantic mapper may still return multiple distinct members.
+        """
+        attachments = list(attachments)
+        if not attachments:
+            return {"processed": 0, "rows": 0, "created_items": 0, "warnings": []}
+
+        request_obj = attachments[0].request
+        try:
+            bundle_text, file_results, failures, ai = cls._evidence_bundle_text(attachments)
+            rows = [cls._normalize_ai_row(row) for row in ai.semantic_rows_from_text(bundle_text)]
+            if not rows:
+                raise ValueError("OCR evidence was read, but no member rows could be identified.")
+
+            created_items = 0
+            primary = attachments[0]
+            for row in rows:
+                values = cls._to_item_values(request_obj, row)
+                EndorsementItem.objects.create(
+                    request=request_obj,
+                    extracted_data=json_safe({
+                        "normalized": row,
+                        "source_raw": row.get("_source_raw", {}),
+                        "source_attachment_ids": [attachment.pk for attachment in attachments],
+                        "evidence_bundle": True,
+                    }),
+                    **values,
+                )
+                created_items += 1
+
+            payload = json_safe({
+                "usage": "initial_evidence_bundle",
+                "source_files": [attachment.original_name for attachment in attachments],
+                "file_results": file_results,
+                "warnings": failures,
+                "normalized_rows": rows,
+                "created_items": created_items,
+                "primary_attachment_id": primary.pk,
+            })
+            for attachment in attachments:
+                attachment.extracted_payload = {
+                    **payload,
+                    "source_file": attachment.original_name,
+                }
+                attachment.processed = True
+                attachment.processing_error = ""
+                attachment.save(update_fields=[
+                    "extracted_payload", "processed", "processing_error", "updated_at",
+                ])
+
+            return {
+                "processed": len(attachments),
+                "rows": len(rows),
+                "created_items": created_items,
+                "warnings": failures,
+            }
+        except Exception as exc:
+            for attachment in attachments:
+                attachment.processed = False
+                attachment.processing_error = str(exc)
+                attachment.save(update_fields=["processed", "processing_error", "updated_at"])
+            raise
+
+    @classmethod
     def process_supplemental_evidence_bundle(cls, attachments):
         """
         Process PDF/image correction files uploaded together as one evidence
