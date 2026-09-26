@@ -452,13 +452,89 @@ class AIService:
         }
         return row
 
+    def _discover_ollama_semantic_mapper(self):
+        current = self.config
+        if not current or current.provider != AIProviderConfig.Provider.OLLAMA:
+            return None
+
+        base = self._base_url()
+        try:
+            with httpx.Client(timeout=min(current.timeout_seconds, 15)) as client:
+                response = client.get(base + "/api/tags", headers=self._headers())
+                response.raise_for_status()
+                installed = [
+                    model.get("name") or model.get("model")
+                    for model in response.json().get("models", [])
+                    if model.get("name") or model.get("model")
+                ]
+        except Exception:
+            return None
+
+        if not installed:
+            return None
+
+        options = current.options or {}
+        forced = str(options.get("semantic_model") or "").strip()
+        if forced:
+            forced_match = next(
+                (name for name in installed if name == forced or name.split(":")[0] == forced),
+                None,
+            )
+            if forced_match:
+                selected = forced_match
+            else:
+                return None
+        else:
+            preferred = [
+                "qwen2.5:7b",
+                "qwen3:8b",
+                "qwen2.5-coder:7b",
+                "deepseek-r1:8b",
+            ]
+            selected = next((name for name in preferred if name in installed), None)
+            if not selected:
+                excluded_terms = ("embed", "glm-ocr", "vision", "vl", "llava", "bakllava")
+                selected = next(
+                    (
+                        name for name in installed
+                        if name != current.model_name
+                        and not any(term in name.lower() for term in excluded_terms)
+                    ),
+                    None,
+                )
+
+        if not selected:
+            return None
+
+        return AIProviderConfig(
+            name=f"Auto-discovered semantic mapper ({selected})",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name=selected,
+            base_url=base,
+            api_key=current.api_key,
+            temperature=0,
+            timeout_seconds=max(current.timeout_seconds, 120),
+            is_active=True,
+            supports_vision=False,
+            options={
+                "num_ctx": 8192,
+                "num_gpu": -1,
+                "num_predict": 768,
+                "keep_alive": "15m",
+            },
+        )
+
     def _semantic_form_mapper(self):
         current = self.config
         if current and not current.supports_vision:
             return self
-        mapper_config = self._select_text_provider(exclude_pk=current.pk if current else None)
+
+        mapper_config = self._select_text_provider(exclude_pk=current.pk if current and current.pk else None)
+        if not mapper_config:
+            mapper_config = self._discover_ollama_semantic_mapper()
         if not mapper_config:
             return None
+
         return AIService(config=mapper_config, product=self.product, context=self.context)
 
     def _semantic_form_prompt(self, text):
@@ -735,6 +811,7 @@ class AIService:
         configured.pop("headers", None)
         configured.pop("keep_alive", None)
         configured.pop("vision_pipeline", None)
+        configured.pop("semantic_model", None)
         defaults = {
             "temperature": float(self.config.temperature),
         }
