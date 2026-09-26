@@ -39,21 +39,21 @@
     </label>
     <label class="form-control">
       <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Status</span></div>
-      <select id="filter-status" name="status" class="select select-bordered searchable-select w-full" data-placeholder="Search status...">
+      <select id="filter-status" name="status" class="select select-bordered w-full">
         <option value="">All statuses</option>
         {% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
     <label class="form-control">
       <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Product</span></div>
-      <select id="filter-product" name="product" class="select select-bordered searchable-select w-full" data-placeholder="Search product...">
+      <select id="filter-product" name="product" class="select select-bordered w-full">
         <option value="">All products</option>
         {% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
     <label class="form-control">
       <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Endorsement type</span></div>
-      <select id="filter-type" name="type" class="select select-bordered searchable-select w-full" data-placeholder="Search type...">
+      <select id="filter-type" name="type" class="select select-bordered w-full">
         <option value="">All types</option>
         {% for value,label in type_choices %}<option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
