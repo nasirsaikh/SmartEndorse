@@ -291,9 +291,33 @@
     });
   }
 
+  function initSourceIntake(root = document) {
+    root.querySelectorAll("[data-source-intake]").forEach(form => {
+      if (form.dataset.sourceReady === "true") return;
+      form.dataset.sourceReady = "true";
+      const buttons = [...form.querySelectorAll("[data-source-choice]")];
+      const panels = [...form.querySelectorAll("[data-source-panel]")];
+      const setMode = mode => {
+        buttons.forEach(button => {
+          const active = button.dataset.sourceChoice === mode;
+          button.classList.toggle("border-primary", active);
+          button.classList.toggle("bg-primary/10", active);
+          button.classList.toggle("border-base-content/15", !active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        panels.forEach(panel => panel.classList.toggle("hidden", panel.dataset.sourcePanel !== mode));
+      };
+      buttons.forEach(button => button.addEventListener("click", () => setMode(button.dataset.sourceChoice)));
+      const hasManualValue = ["id_full_name", "id_member_no", "id_employee_no", "id_national_id"]
+        .some(id => (form.querySelector("#" + id)?.value || "").trim());
+      setMode(hasManualValue ? "manual" : "files");
+    });
+  }
+
   function initialize(root = document) {
     initDropzones(root);
     initPlanSumAssured(root);
+    initSourceIntake(root);
     notifyNewPortalItems(root);
     updateThemeIcon();
     setTimeout(syncPlotlyTheme, 50);
