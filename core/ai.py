@@ -131,7 +131,12 @@ class AIService:
     def extract_image_bytes(self, content, mime="image/png"):
         self._require_provider(vision=True)
         system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
-        prompt += "\n\nRead the attached image carefully and extract the supported member data."
+        prompt += (
+            "\n\nRead the attached image carefully and extract the supported member data."
+            "\nReturn exactly one valid JSON object with a top-level key \"items\"."
+            "\nThe value of \"items\" must be an array of member objects using the canonical fields."
+            "\nDo not add markdown, commentary, explanations, code fences, or text outside the JSON object."
+        )
         encoded = base64.b64encode(content).decode("ascii")
         return self._parse_json_array(self._vision(prompt, encoded, mime, system))
 
@@ -220,17 +225,70 @@ class AIService:
             return "".join(block.get("text", "") for block in data.get("content", []))
         return data["choices"][0]["message"]["content"]
 
+    def _ollama_installed_models(self, client, base):
+        try:
+            response = client.get(base + "/api/tags", headers=self._headers())
+            if response.is_success:
+                return [
+                    model.get("name") or model.get("model")
+                    for model in response.json().get("models", [])
+                    if model.get("name") or model.get("model")
+                ]
+        except Exception:
+            pass
+        return []
+
+    def _ollama_response_json(self, response, client, base, endpoint):
+        if not response.is_success:
+            detail = response.text.strip()
+            try:
+                detail = response.json().get("error") or detail
+            except Exception:
+                pass
+            installed = self._ollama_installed_models(client, base) if response.status_code == 404 else []
+            model_note = f" Installed models: {', '.join(installed)}." if installed else ""
+            raise RuntimeError(
+                f"Ollama {endpoint} failed with HTTP {response.status_code} for model "
+                f"'{self.config.model_name}'. {detail or response.reason_phrase}.{model_note}"
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            preview = (response.text or "")[:500].strip()
+            raise RuntimeError(
+                f"Ollama {endpoint} returned a non-JSON HTTP response for model "
+                f"'{self.config.model_name}': {preview or '<empty response>'}"
+            ) from exc
+
     def _vision(self, prompt, encoded, mime, system_prompt=""):
         cfg = self.config
         base = self._base_url()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
-            url = base + "/api/chat"
-            messages = []
+            # /api/generate is the most compatible multimodal endpoint for older
+            # Ollama vision models such as BakLLaVA/LLaVA.
+            url = base + "/api/generate"
+            payload = {
+                "model": cfg.model_name,
+                "stream": False,
+                "prompt": prompt,
+                "images": [encoded],
+                "format": "json",
+                "options": {"temperature": float(cfg.temperature)},
+            }
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt, "images": [encoded]})
-            payload = {"model": cfg.model_name, "stream": False, "messages": messages}
-        elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
+                payload["system"] = system_prompt
+
+            with httpx.Client(timeout=cfg.timeout_seconds) as client:
+                response = client.post(url, headers=self._headers(), json=payload)
+                # Very old Ollama builds/models may reject JSON mode. Retry once
+                # without format; the parser below still extracts embedded JSON.
+                if response.status_code == 400 and "format" in (response.text or "").lower():
+                    payload.pop("format", None)
+                    response = client.post(url, headers=self._headers(), json=payload)
+                data = self._ollama_response_json(response, client, base, "/api/generate")
+            return data.get("response", "")
+
+        if cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             url = base + "/v1/messages"
             payload = {
                 "model": cfg.model_name,
@@ -258,9 +316,9 @@ class AIService:
             }
 
         with httpx.Client(timeout=cfg.timeout_seconds) as client:
-            data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
-        if cfg.provider == AIProviderConfig.Provider.OLLAMA:
-            return data["message"]["content"]
+            response = client.post(url, headers=self._headers(), json=payload)
+            response.raise_for_status()
+            data = response.json()
         if cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             return "".join(block.get("text", "") for block in data.get("content", []))
         return data["choices"][0]["message"]["content"]
