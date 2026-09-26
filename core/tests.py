@@ -272,7 +272,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    @patch("core.views.FileIntakeService._extract")
+    @patch("core.views.FileIntakeService.extract_item_form_fields")
     def test_item_ocr_fills_preview_without_saving_until_review(self, extract_mock):
         self.grant_client_access()
         req = EndorsementRequest.objects.create(
@@ -306,6 +306,7 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "OCR Name")
         self.assertContains(response, "Nothing is saved until you click")
+        self.assertContains(response, "Document fields were read directly into the form")
         item.refresh_from_db()
         self.assertEqual(item.full_name, "Old Name")
         ocr_attachment = req.attachments.order_by("-pk").first()
@@ -564,6 +565,77 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertFalse(ai.config.supports_vision)
         ai._require_provider(vision=True)
         self.assertEqual(ai.config, vision_provider)
+
+    def test_direct_form_field_extraction_does_not_require_json(self):
+        ai = AIService(
+            product=Policy.Product.GROUP_MEDICAL,
+            context={
+                "valid_plans": [
+                    {"code": "G", "name": "Gold", "sum_assured": None},
+                    {"code": "S", "name": "Silver", "sum_assured": None},
+                ]
+            },
+        )
+        text = (
+            "Employee ID: E1101-1\n"
+            "Civil ID: 12345678\n"
+            "Member Name: Sara Al Hinai\n"
+            "Relationship: Daughter\n"
+            "DOB: 22/09/2018\n"
+            "Sex: F\n"
+            "Plan: Gold\n"
+            "Effective Date: 15/09/2026\n"
+            "This is ordinary OCR text, not JSON."
+        )
+
+        row = ai.extract_form_fields_from_text(text)
+
+        self.assertEqual(row["employee_no"], "E1101-1")
+        self.assertEqual(row["national_id"], "12345678")
+        self.assertEqual(row["full_name"], "Sara Al Hinai")
+        self.assertEqual(row["relationship"], "Daughter")
+        self.assertEqual(row["date_of_birth"], "22/09/2018")
+        self.assertEqual(row["gender"], "F")
+        self.assertEqual(row["plan_code"], "G")
+        self.assertEqual(row["effective_date"], "15/09/2026")
+        self.assertEqual(row["_source_raw"]["extraction_mode"], "direct_form_fill")
+
+    @patch.object(
+        AIService,
+        "_vision_ocr_text",
+        return_value=(
+            "Civil Number: 99887766\n"
+            "Insured Name: Noura Said\n"
+            "Relation: Wife\n"
+            "Date of Birth: 01-02-1990\n"
+            "Gender: Female\n"
+            "Medical Class: Gold"
+        ),
+    )
+    def test_glm_form_fill_uses_ocr_text_directly_without_text_json_mapper(self, ocr_mock):
+        glm = AIProviderConfig.objects.create(
+            name="GLM OCR Direct Form",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        ai = AIService(
+            config=glm,
+            product=Policy.Product.GROUP_MEDICAL,
+            context={"valid_plans": [{"code": "G", "name": "Gold"}]},
+        )
+
+        row = ai.extract_form_fields_from_image_bytes(b"image", "image/jpeg")
+
+        self.assertEqual(row["national_id"], "99887766")
+        self.assertEqual(row["full_name"], "Noura Said")
+        self.assertEqual(row["relationship"], "Wife")
+        self.assertEqual(row["date_of_birth"], "01-02-1990")
+        self.assertEqual(row["gender"], "Female")
+        self.assertEqual(row["plan_code"], "G")
+        self.assertTrue(ocr_mock.called)
 
     @patch("core.ai.httpx.Client")
     def test_bakllava_vision_uses_generate_endpoint_and_json_mode(self, client_cls):
