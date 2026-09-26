@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from .access import accessible_policies, can_decide_approval
 from .ai import AIService
@@ -564,6 +564,68 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertFalse(ai.config.supports_vision)
         ai._require_provider(vision=True)
         self.assertEqual(ai.config, vision_provider)
+
+    @patch("core.ai.httpx.Client")
+    def test_bakllava_vision_uses_generate_endpoint_and_json_mode(self, client_cls):
+        provider = AIProviderConfig.objects.create(
+            name="BakLLaVA OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="bakllava:latest",
+            base_url="http://127.0.0.1:11434",
+            timeout_seconds=300,
+            is_active=True,
+            supports_vision=True,
+        )
+        response = MagicMock()
+        response.is_success = True
+        response.status_code = 200
+        response.json.return_value = {
+            "response": '{"items":[{"full_name":"Aisha","relationship":"Employee"}]}'
+        }
+        client = client_cls.return_value.__enter__.return_value
+        client.post.return_value = response
+
+        ai = AIService(config=provider, product=Policy.Product.GROUP_MEDICAL)
+        rows = ai.extract_image_bytes(b"fake-image", "image/jpeg")
+
+        self.assertEqual(rows[0]["full_name"], "Aisha")
+        url = client.post.call_args.args[0]
+        payload = client.post.call_args.kwargs["json"]
+        self.assertEqual(url, "http://127.0.0.1:11434/api/generate")
+        self.assertEqual(payload["model"], "bakllava:latest")
+        self.assertEqual(payload["format"], "json")
+        self.assertFalse(payload["stream"])
+        self.assertTrue(payload["images"])
+        self.assertIn('"items"', payload["prompt"])
+
+    @patch("core.ai.httpx.Client")
+    def test_ollama_404_explains_model_and_installed_models(self, client_cls):
+        provider = AIProviderConfig.objects.create(
+            name="BakLLaVA OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="bakllava:latest",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        failed = MagicMock()
+        failed.is_success = False
+        failed.status_code = 404
+        failed.text = '{"error":"model \'bakllava:latest\' not found"}'
+        failed.json.return_value = {"error": "model 'bakllava:latest' not found"}
+
+        tags = MagicMock()
+        tags.is_success = True
+        tags.json.return_value = {"models": [{"name": "llava:latest"}, {"name": "qwen2.5:7b"}]}
+
+        client = client_cls.return_value.__enter__.return_value
+        client.post.return_value = failed
+        client.get.return_value = tags
+
+        ai = AIService(config=provider)
+        with self.assertRaisesRegex(RuntimeError, "bakllava:latest") as error:
+            ai.extract_image_bytes(b"fake-image", "image/jpeg")
+        self.assertIn("Installed models: llava:latest, qwen2.5:7b", str(error.exception))
 
     def test_seeded_admin_training_profiles_exist(self):
         self.assertTrue(
