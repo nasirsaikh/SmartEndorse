@@ -14,6 +14,44 @@ CANONICAL_FIELDS = [
     "effective_date",
 ]
 
+NULLABLE_STRING = {"type": ["string", "null"]}
+NULLABLE_NUMBER = {"type": ["number", "string", "null"]}
+MEMBER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "member_no": NULLABLE_STRING,
+                    "employee_no": NULLABLE_STRING,
+                    "national_id": NULLABLE_STRING,
+                    "full_name": NULLABLE_STRING,
+                    "relationship": {
+                        "type": ["string", "null"],
+                        "enum": ["Employee", "Spouse", "Child", None],
+                    },
+                    "date_of_birth": NULLABLE_STRING,
+                    "gender": {
+                        "type": ["string", "null"],
+                        "enum": ["Male", "Female", None],
+                    },
+                    "plan_code": NULLABLE_STRING,
+                    "annual_salary": NULLABLE_NUMBER,
+                    "sum_assured": NULLABLE_NUMBER,
+                    "effective_date": NULLABLE_STRING,
+                    "_source_raw": {"type": ["object", "null"]},
+                },
+                "required": CANONICAL_FIELDS,
+                "additionalProperties": True,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are a precise insurance data extraction engine. "
     "Use only information supported by the supplied source. Never invent missing values. "
@@ -43,9 +81,14 @@ class AIService:
         self.last_profile = None
 
     @staticmethod
-    def _select_text_provider():
+    def _select_text_provider(exclude_pk=None):
         qs = AIProviderConfig.objects.filter(is_active=True)
-        return qs.filter(supports_vision=False).order_by("-updated_at", "-pk").first() or qs.order_by("-updated_at", "-pk").first()
+        if exclude_pk:
+            qs = qs.exclude(pk=exclude_pk)
+        return (
+            qs.filter(supports_vision=False).order_by("-updated_at", "-pk").first()
+            or qs.order_by("-updated_at", "-pk").first()
+        )
 
     @staticmethod
     def _select_vision_provider():
@@ -114,14 +157,14 @@ class AIService:
         self._require_provider()
         system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
         prompt += "\n\nDOCUMENT TEXT:\n" + text[:60000]
-        return self._parse_json_array(self._chat(prompt, system))
+        return self._parse_json_array(self._chat(prompt, system, response_schema=MEMBER_OUTPUT_SCHEMA))
 
     def normalize_structured_rows(self, rows):
         self._require_provider()
         system, prompt = self._prompt_bundle(AIExtractionProfile.Task.STRUCTURED_MAPPING)
         serializable = json.dumps(rows[:500], default=str, ensure_ascii=False)
         prompt += "\n\nSOURCE ROWS:\n" + serializable
-        return self._parse_json_array(self._chat(prompt, system))
+        return self._parse_json_array(self._chat(prompt, system, response_schema=MEMBER_OUTPUT_SCHEMA))
 
     def extract_image_rows(self, path):
         path = Path(path)
@@ -130,6 +173,26 @@ class AIService:
 
     def extract_image_bytes(self, content, mime="image/png"):
         self._require_provider(vision=True)
+        encoded = base64.b64encode(content).decode("ascii")
+
+        if self._uses_ocr_text_pipeline():
+            ocr_text = self._vision_ocr_text(encoded, mime)
+            if not (ocr_text or "").strip():
+                raise ValueError("OCR model returned no readable text.")
+
+            mapper_config = self._select_text_provider(exclude_pk=self.config.pk)
+            if not mapper_config or mapper_config.supports_vision:
+                raise RuntimeError(
+                    "GLM-OCR read the document, but no separate active text AI provider is configured "
+                    "to convert OCR text into strict JSON. Keep your normal Ollama text model active "
+                    "(for example qwen2.5:7b) with Supports vision disabled."
+                )
+
+            mapper = AIService(config=mapper_config, product=self.product, context=self.context)
+            rows = mapper.extract_text_rows(ocr_text)
+            self.last_profile = mapper.last_profile
+            return rows
+
         system, prompt = self._prompt_bundle(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
         prompt += (
             "\n\nRead the attached image carefully and extract the supported member data."
@@ -137,8 +200,21 @@ class AIService:
             "\nThe value of \"items\" must be an array of member objects using the canonical fields."
             "\nDo not add markdown, commentary, explanations, code fences, or text outside the JSON object."
         )
-        encoded = base64.b64encode(content).decode("ascii")
-        return self._parse_json_array(self._vision(prompt, encoded, mime, system))
+        return self._parse_json_array(
+            self._vision(prompt, encoded, mime, system, response_schema=MEMBER_OUTPUT_SCHEMA)
+        )
+
+    def _uses_ocr_text_pipeline(self):
+        options = self.config.options or {}
+        mode = str(options.get("vision_pipeline") or "").strip().lower()
+        if mode in {"direct", "direct_json"}:
+            return False
+        if mode in {"ocr_then_json", "ocr_text_then_json"}:
+            return True
+        return (
+            self.config.provider == AIProviderConfig.Provider.OLLAMA
+            and "glm-ocr" in (self.config.model_name or "").lower()
+        )
 
     def _require_provider(self, vision=False):
         if vision:
@@ -199,7 +275,7 @@ class AIService:
             return "https://api.anthropic.com"
         raise RuntimeError("base_url is required for OpenAI-compatible providers.")
 
-    def _chat(self, prompt, system_prompt=""):
+    def _chat(self, prompt, system_prompt="", response_schema=None):
         cfg = self.config
         base = self._base_url()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
@@ -215,6 +291,8 @@ class AIService:
                 "options": self._ollama_runtime_options(vision=False),
                 "keep_alive": self._ollama_keep_alive(),
             }
+            if response_schema:
+                payload["format"] = response_schema
         elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             url = base + "/v1/messages"
             payload = {
@@ -280,7 +358,31 @@ class AIService:
                 f"'{self.config.model_name}': {preview or '<empty response>'}"
             ) from exc
 
-    def _vision(self, prompt, encoded, mime, system_prompt=""):
+    def _vision_ocr_text(self, encoded, mime):
+        cfg = self.config
+        if cfg.provider != AIProviderConfig.Provider.OLLAMA:
+            raise RuntimeError("The OCR-text pipeline currently requires an Ollama vision provider.")
+
+        base = self._base_url()
+        url = base + "/api/generate"
+        payload = {
+            "model": cfg.model_name,
+            "stream": False,
+            "prompt": (
+                "Text Recognition: Transcribe all visible text from this document faithfully. "
+                "Preserve labels, values, line breaks, and table row order. "
+                "Do not summarize, infer, normalize, or return JSON. Output OCR text only."
+            ),
+            "images": [encoded],
+            "options": self._ollama_runtime_options(vision=True),
+            "keep_alive": self._ollama_keep_alive(),
+        }
+        with httpx.Client(timeout=cfg.timeout_seconds) as client:
+            response = client.post(url, headers=self._headers(), json=payload)
+            data = self._ollama_response_json(response, client, base, "/api/generate")
+        return data.get("response", "")
+
+    def _vision(self, prompt, encoded, mime, system_prompt="", response_schema=None):
         cfg = self.config
         base = self._base_url()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
@@ -292,7 +394,7 @@ class AIService:
                 "stream": False,
                 "prompt": prompt,
                 "images": [encoded],
-                "format": "json",
+                "format": response_schema or "json",
                 "options": self._ollama_runtime_options(vision=True),
                 "keep_alive": self._ollama_keep_alive(),
             }
@@ -345,6 +447,18 @@ class AIService:
         return data["choices"][0]["message"]["content"]
 
     @staticmethod
+    def _rows_from_json_value(data):
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("items", "members", "rows", "data"):
+                if isinstance(data.get(key), list):
+                    return data[key]
+            if any(key in data for key in CANONICAL_FIELDS):
+                return [data]
+        return None
+
+    @staticmethod
     def _parse_json_array(content):
         content = (content or "").strip()
         if not content:
@@ -360,27 +474,27 @@ class AIService:
 
         try:
             data = json.loads(content)
+            rows = AIService._rows_from_json_value(data)
+            if rows is not None:
+                return rows
         except json.JSONDecodeError:
-            array_start, array_end = content.find("["), content.rfind("]")
-            object_start, object_end = content.find("{"), content.rfind("}")
-            candidate = ""
-            if array_start >= 0 and array_end > array_start:
-                candidate = content[array_start:array_end + 1]
-            elif object_start >= 0 and object_end > object_start:
-                candidate = content[object_start:object_end + 1]
-            if not candidate:
-                raise ValueError("AI response did not contain valid JSON.")
+            pass
+
+        # Recover the first complete JSON array/object from conversational text
+        # or concatenated model output such as: {...}{...}.
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(content):
+            if char not in "[{":
+                continue
             try:
-                data = json.loads(candidate)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"AI response contained invalid JSON: {exc}") from exc
+                data, _ = decoder.raw_decode(content[index:])
+            except json.JSONDecodeError:
+                continue
+            rows = AIService._rows_from_json_value(data)
+            if rows is not None:
+                return rows
 
-        if isinstance(data, dict):
-            for key in ("items", "members", "rows", "data"):
-                if isinstance(data.get(key), list):
-                    data = data[key]
-                    break
-
-        if not isinstance(data, list):
-            raise ValueError("AI response is not a JSON array.")
-        return data
+        raise ValueError(
+            "AI response did not contain a valid SmartEndorse JSON object/array. "
+            "The OCR text may have been read successfully, but JSON mapping failed."
+        )
