@@ -4,83 +4,9 @@
 {% block page_title %}{{ endorsement.reference }}{% endblock %}
 {% block object_tools %}
   <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>PIPELINE</a>
-  <a href="#audit-trail" class="btn btn-ghost btn-sm"><i class="bi bi-clock-history"></i>AUDIT</a>
+  <a href="?step=completion#audit-trail" class="btn btn-ghost btn-sm"><i class="bi bi-clock-history"></i>AUDIT</a>
 {% endblock %}
 {% block content %}
-
-<section class="se-panel mb-4">
-  <div class="grid grid-cols-1 gap-px bg-base-content/10 sm:grid-cols-5">
-    {% for step in wizard_steps %}
-    <div class="bg-base-100 p-3 {% if step.state == 'active' %}ring-1 ring-inset ring-primary{% endif %}">
-      <div class="flex items-center gap-2">
-        <span class="grid h-6 w-6 shrink-0 place-items-center rounded-sm border {% if step.state == 'done' %}border-success/50 bg-success/10 text-success{% elif step.state == 'active' %}border-primary/60 bg-primary/10 text-primary{% else %}border-base-content/15 opacity-50{% endif %} font-mono text-[10px] font-bold">
-          {% if step.state == "done" %}<i class="bi bi-check-lg"></i>{% else %}{{ forloop.counter }}{% endif %}
-        </span>
-        <span class="text-[10px] font-bold uppercase tracking-wider {% if step.state == 'active' %}text-primary{% else %}opacity-65{% endif %}">{{ step.label }}</span>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  <div class="flex flex-col gap-2 border-t border-base-content/10 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-    <div><i class="bi bi-stopwatch mr-1 text-primary"></i><strong>Current SLA:</strong> {% if endorsement.current_sla_due_at %}{{ endorsement.current_sla_due_at|date:"d M Y H:i" }}{% else %}not running{% endif %}{% if endorsement.sla_breached %} <span class="ml-2 font-bold text-error">BREACHED</span>{% endif %}</div>
-    <div class="opacity-50">Role, organization and workflow state control every action.</div>
-  </div>
-</section>
-
-<section class="se-panel mb-4">
-  <div class="se-panel-head">
-    <div><div class="se-eyebrow">Process control</div><div class="se-panel-title mt-1">CURRENT STEP & NEXT ACTION</div></div>
-    <span class="se-status se-status-{{ endorsement.status|lower }}">{{ endorsement.get_status_display }}</span>
-  </div>
-  <div class="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-    <div class="text-xs leading-5 opacity-70">
-      {% if endorsement.status == "DRAFT" %}
-        <strong class="text-base-content">Intake:</strong> Review extracted/manual member rows. You can edit, add or remove members before submitting for validation.
-      {% elif endorsement.status == "NEEDS_INFO" or endorsement.status == "REJECTED" %}
-        <strong class="text-base-content">Correction required:</strong> Resolve the listed issue(s), update member/file data, then validate and resubmit.
-        {% if latest_rejection_reason %}<div class="mt-2 rounded border border-error/20 bg-error/5 px-3 py-2 text-error"><strong>Rejection reason:</strong> {{ latest_rejection_reason }}</div>{% endif %}
-      {% elif endorsement.status == "PENDING_INSURER_APPROVAL" %}
-        <strong class="text-base-content">Insurance approval:</strong> The request failed an auto-approval rule or requires exception review. An authorised insurer user must approve or reject with a reason.
-      {% elif endorsement.status == "AUTO_APPROVED" or endorsement.status == "SUBMITTED" %}
-        <strong class="text-base-content">Approved:</strong> The endorsement passed configured rules and is ready for downstream processing.
-      {% elif endorsement.status == "SENT_TO_TPA" or endorsement.status == "TPA_IN_PROGRESS" or endorsement.status == "TPA_QUERY" %}
-        <strong class="text-base-content">TPA processing:</strong> TPA reviews the request, may raise a query, and must record card number, effective date and amount before completion.
-      {% elif endorsement.status == "CORE_DISPATCHED" %}
-        <strong class="text-base-content">Insurer operations:</strong> The approved endorsement is queued for core-system processing / month-end passing.
-      {% elif endorsement.status == "COMPLETED" %}
-        <strong class="text-base-content">Completed:</strong> All required processing is finished and total SLA is final.
-      {% endif %}
-    </div>
-    {% if can_edit and endorsement.status == "DRAFT" or can_edit and endorsement.status == "NEEDS_INFO" or can_edit and endorsement.status == "REJECTED" or can_edit and endorsement.status == "TPA_QUERY" %}
-    <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
-      {% csrf_token %}
-      <button class="btn btn-primary" type="submit"><i class="bi bi-shield-check"></i>VALIDATE & SUBMIT</button>
-    </form>
-    {% endif %}
-  </div>
-</section>
-
-<section class="se-panel mb-4">
-  <div class="se-panel-head">
-    <div><div class="se-eyebrow">Service level telemetry</div><div class="se-panel-title mt-1">REQUIRED VS ACTUAL SLA</div></div>
-    <i class="bi bi-stopwatch text-primary"></i>
-  </div>
-  <div class="overflow-x-auto">
-    <table class="se-table">
-      <thead><tr><th>Step</th><th class="num">Required SLA</th><th class="num">Actual / elapsed</th><th>Status</th></tr></thead>
-      <tbody>
-      {% for row in sla_rows %}
-      <tr>
-        <td><strong>{{ row.label }}</strong></td>
-        <td class="num mono">{{ row.target_hours }}h</td>
-        <td class="num mono">{% if row.actual_hours != None %}{{ row.actual_hours }}h{% else %}—{% endif %}</td>
-        <td>{% if row.breached %}<span class="se-status se-status-error">Breached</span>{% elif row.active %}<span class="se-status se-status-info">Running</span>{% elif row.actual_hours != None %}<span class="se-status se-status-ok">Completed</span>{% else %}<span class="se-status">Pending</span>{% endif %}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
 
 <section class="se-panel mb-4">
   <div class="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
@@ -107,386 +33,94 @@
   </div>
 </section>
 
-{% if member_issues or request_issues or has_blocking_document_issues %}
-<section class="se-panel mb-4 border-warning/40">
-  <div class="se-panel-head bg-warning/10">
-    <div>
-      <div class="se-eyebrow text-warning opacity-100">Blocking validation</div>
-      <div class="se-panel-title mt-1">ACTION REQUIRED BEFORE PROCESSING</div>
+<section class="se-workflow-shell mb-4" id="workflow-wizard">
+  <div class="se-workflow-scroll">
+    <div class="se-workflow-wizard">
+      {% for step in wizard_steps %}
+      <a href="?step={{ step.key }}#workflow-stage"
+         class="se-workflow-step {% if step.state == 'active' %}is-current{% elif step.state == 'done' %}is-done{% endif %} {% if selected_step == step.key %}is-selected{% endif %}"
+         {% if selected_step == step.key %}aria-current="step"{% endif %}>
+        <div class="se-workflow-step-top">
+          <span class="se-workflow-index">
+            {% if step.state == "done" %}<i class="bi bi-check-lg"></i>{% else %}{{ forloop.counter }}{% endif %}
+          </span>
+          <div class="min-w-0">
+            <div class="se-workflow-name">{{ step.label }}</div>
+            <div class="se-workflow-state">
+              {% if step.state == "active" %}CURRENT{% elif step.state == "done" %}DONE{% else %}PENDING{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="se-workflow-tat">
+          <div>
+            <span>{% if step.key == "completion" %}TOTAL TARGET{% else %}TARGET TAT{% endif %}</span>
+            <strong>{{ step.target_hours }}h</strong>
+          </div>
+          <div>
+            <span>{{ step.tat_label|upper }}</span>
+            <strong class="{% if step.breached %}text-error{% elif step.actual_hours != None %}text-success{% endif %}">{% if step.actual_hours != None %}{{ step.actual_hours }}h{% else %}—{% endif %}</strong>
+          </div>
+        </div>
+        {% if step.breached %}<div class="se-workflow-breach"><i class="bi bi-exclamation-triangle"></i> TAT BREACHED</div>{% endif %}
+      </a>
+      {% endfor %}
     </div>
-    {% if can_edit and endorsement.status == "NEEDS_INFO" or can_edit and endorsement.status == "TPA_QUERY" %}
-    <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
-      {% csrf_token %}
-      <button class="btn btn-warning btn-sm" type="submit"><i class="bi bi-arrow-repeat"></i>REVALIDATE NOW</button>
-    </form>
+  </div>
+  <div class="se-workflow-footer">
+    <div><i class="bi bi-stopwatch mr-1 text-primary"></i><strong>Live SLA due:</strong> {% if endorsement.current_sla_due_at %}{{ endorsement.current_sla_due_at|date:"d M Y H:i" }}{% else %}not running{% endif %}{% if endorsement.sla_breached %}<span class="ml-2 font-bold text-error">BREACHED</span>{% endif %}</div>
+    <div><strong>Total TAT:</strong> {{ completion_tat.actual_hours }}h / {{ completion_tat.target_hours }}h target</div>
+  </div>
+</section>
+
+<section id="workflow-stage" class="scroll-mt-24">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <div class="se-eyebrow">Workflow page</div>
+      <div class="mt-1 font-mono text-sm font-bold uppercase tracking-wider">
+        {% if selected_step == "intake" %}1. Intake & Correction
+        {% elif selected_step == "validation" %}2. Validation
+        {% elif selected_step == "approval" %}3. Insurance Approval
+        {% elif selected_step == "processing" %}4. TPA / Core Processing
+        {% elif selected_step == "completion" %}5. Completion
+        {% endif %}
+      </div>
+    </div>
+    {% if selected_step != current_step %}
+      <a class="btn btn-primary btn-outline btn-sm" href="?step={{ current_step }}#workflow-stage"><i class="bi bi-crosshair"></i>GO TO CURRENT STEP</a>
     {% endif %}
   </div>
 
-  {% if member_issues %}
-  <div class="border-b border-base-content/10 p-4">
-    <div class="mb-3 flex items-center gap-2">
-      <i class="bi bi-person-exclamation text-error"></i>
-      <strong class="text-sm">Member validation issues</strong>
-      <span class="badge badge-error badge-sm">{{ member_issues|length }}</span>
-    </div>
-    <div class="space-y-2">
-      {% for issue in member_issues %}
-      <div class="flex flex-col gap-2 rounded-box border border-error/20 bg-error/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div class="text-xs font-semibold">{{ issue.member_label }}</div>
-          <div class="mt-1 text-[11px] text-error">{{ issue.error }}</div>
-          <div class="mt-1 font-mono text-[9px] opacity-45">ITEM #{{ issue.item.pk }}{% if issue.item.employee_no %} · EMPLOYEE {{ issue.item.employee_no }}{% elif issue.item.member_no %} · MEMBER {{ issue.item.member_no }}{% endif %}</div>
-        </div>
-        {% if can_edit %}<a href="{% url 'endorsement_item_edit' endorsement.pk issue.item.pk %}" class="btn btn-error btn-outline btn-xs"><i class="bi bi-pencil-square"></i>CORRECT MEMBER</a>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {% if request_issues %}
-  <div class="border-b border-base-content/10 p-4">
-    <div class="mb-2 flex items-center gap-2"><i class="bi bi-shield-exclamation text-warning"></i><strong class="text-sm">Policy / request issues</strong></div>
-    <ul class="list-disc space-y-1 pl-5 text-xs">{% for error in request_issues %}<li>{{ error }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  {% if has_blocking_document_issues %}
-  <div class="p-4">
-    <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex items-center gap-2">
-        <i class="bi bi-file-earmark-x text-warning"></i>
-        <strong class="text-sm">Document processing issues</strong>
-      </div>
-      {% if can_edit %}
-      <form method="post" action="{% url 'endorsement_retry_failed_evidence' endorsement.pk %}">
-        {% csrf_token %}
-        <button class="btn btn-warning btn-sm" type="submit">
-          <i class="bi bi-layers"></i>RETRY FAILED DOCUMENTS TOGETHER
-        </button>
-      </form>
-      {% endif %}
-    </div>
-    <div class="mb-3 text-[10px] leading-4 opacity-55">PDF/image failures can be retried as one evidence bundle so front/back ID files and multi-page documents complement each other before member matching.</div>
-    <div class="space-y-2">
-      {% for issue in document_issues %}
-        {% if issue.blocking %}
-        <div class="flex flex-col gap-2 rounded-box border border-warning/25 bg-warning/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div class="text-xs font-semibold">{{ issue.attachment.original_name }}</div>
-            <div class="mt-1 text-[11px] text-warning">{{ issue.error }}</div>
-            <div class="mt-1 text-[10px] opacity-50">This is a document-processing error, not a member validation error.</div>
-          </div>
-          {% if can_edit %}
-          <form method="post" action="{% url 'endorsement_remove_failed_attachment' endorsement.pk issue.attachment.pk %}" onsubmit="return confirm('Remove failed document {{ issue.attachment.original_name|escapejs }} and revalidate this endorsement?');">
-            {% csrf_token %}
-            <button class="btn btn-warning btn-outline btn-xs" type="submit"><i class="bi bi-trash3"></i>REMOVE FAILED FILE</button>
-          </form>
-          {% endif %}
-        </div>
-        {% endif %}
-      {% endfor %}
-    </div>
-  </div>
+  {% if selected_step == "intake" %}
+    {% include "endorsements/partials/_step_intake.html" %}
+  {% elif selected_step == "validation" %}
+    {% include "endorsements/partials/_step_validation.html" %}
+  {% elif selected_step == "approval" %}
+    {% include "endorsements/partials/_step_approval.html" %}
+  {% elif selected_step == "processing" %}
+    {% include "endorsements/partials/_step_processing.html" %}
+  {% elif selected_step == "completion" %}
+    {% include "endorsements/partials/_step_completion.html" %}
   {% endif %}
 </section>
-{% endif %}
-
-{% if document_issues %}
-  {% for issue in document_issues %}
-    {% if issue.optional_ocr %}
-    <div role="alert" class="alert alert-info mb-4 items-start">
-      <i class="bi bi-file-earmark-image mt-0.5"></i>
-      <div class="grow">
-        <strong>OCR helper warning: {{ issue.attachment.original_name }}</strong>
-        <div class="mt-1 text-xs">{{ issue.error }}</div>
-        <div class="mt-1 text-[10px] opacity-60">The member record remains valid. This optional OCR-preview failure does not block processing.</div>
-      </div>
-      {% if can_edit %}
-      <form method="post" action="{% url 'endorsement_remove_failed_attachment' endorsement.pk issue.attachment.pk %}">
-        {% csrf_token %}
-        <button class="btn btn-info btn-outline btn-xs" type="submit">DISMISS FILE</button>
-      </form>
-      {% endif %}
-    </div>
-    {% endif %}
-  {% endfor %}
-{% endif %}
-
-<div class="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(300px,1fr)]">
-  <div class="min-w-0 space-y-4">
-    <section class="se-panel">
-      <div class="se-panel-head">
-        <div><div class="se-eyebrow">Normalized records</div><div class="se-panel-title mt-1">MEMBER MATRIX</div></div>
-        <span class="badge badge-ghost badge-sm">{{ item_kpis.total }} ROW{{ item_kpis.total|pluralize|upper }}</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="se-table">
-          <thead><tr><th>Status</th><th>Member</th><th>Relationship / plan</th><th>Effective</th><th>Card no.</th><th>TPA effective</th><th class="num">System impact</th><th class="num">TPA amount</th><th>Actions</th></tr></thead>
-          <tbody>
-          {% for item in endorsement.items.all %}
-            <tr>
-              <td><span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>{% if item.is_existing_record %}<div class="mt-1 text-[10px] text-warning">EXISTING POLICY RECORD</div>{% endif %}</td>
-              <td><strong class="text-xs">{{ item.full_name|default:"—" }}</strong><div class="mt-1 text-[10px] opacity-45">{{ item.member_no|default:item.employee_no|default:item.national_id|default:"No identifier" }}</div>{% if item.validation_errors %}<div class="mt-1 max-w-xs text-[10px] text-error">{{ item.validation_errors|join:", " }}</div>{% endif %}</td>
-              <td>{{ item.relationship|default:"—" }}<div class="text-[10px] opacity-45">{% if item.plan %}{{ item.plan.code }} · {{ item.plan.name }}{% else %}No plan{% endif %}</div></td>
-              <td class="mono">{{ item.effective_date|default:endorsement.effective_date|date:"d M Y" }}</td>
-              <td class="mono">{{ item.card_number|default:"—" }}</td>
-              <td class="mono">{{ item.tpa_effective_date|date:"d M Y"|default:"—" }}</td>
-              <td class="num mono">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</td>
-              <td class="num mono">{% if item.tpa_premium_amount != None %}{{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}{% else %}—{% endif %}</td>
-              <td class="whitespace-nowrap">
-                {% if can_edit %}<a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>{% endif %}
-                {% if can_delete_items %}
-                <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="inline" onsubmit="return confirm('Delete this member row from the intake/correction?');">
-                  {% csrf_token %}
-                  <button class="btn btn-error btn-ghost btn-xs" type="submit"><i class="bi bi-trash3"></i>DELETE</button>
-                </form>
-                {% endif %}
-                <details class="dropdown dropdown-end inline-block">
-                  <summary class="btn btn-ghost btn-xs"><i class="bi bi-braces"></i>SOURCE</summary>
-                  <div class="dropdown-content z-30 mt-2 w-[min(36rem,90vw)] rounded-box border border-base-content/10 bg-base-100 p-3 shadow-2xl"><pre class="se-json">{{ item.extracted_data }}</pre></div>
-                </details>
-              </td>
-            </tr>
-
-            {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
-            <tr>
-              <td colspan="9" class="bg-info/5">
-                <form class="grid gap-3 md:grid-cols-[1.4fr_1.2fr_1.4fr_auto] md:items-end" method="post" action="{% url 'endorsement_tpa_item' endorsement.pk item.pk %}">
-                  {% csrf_token %}
-                  <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA card number *</span><input class="input input-bordered w-full" name="card_number" value="{{ item.card_number }}" required></label>
-                  <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA effective date *</span><input class="input input-bordered w-full" type="date" name="effective_date" value="{% if item.tpa_effective_date %}{{ item.tpa_effective_date|date:'Y-m-d' }}{% elif item.effective_date %}{{ item.effective_date|date:'Y-m-d' }}{% else %}{{ endorsement.effective_date|date:'Y-m-d' }}{% endif %}" required></label>
-                  <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA premium / refund amount *</span><input class="input input-bordered w-full" type="number" step="0.001" name="amount" value="{% if item.tpa_premium_amount != None %}{{ item.tpa_premium_amount }}{% else %}{{ item.premium_impact }}{% endif %}" required></label>
-                  <button class="btn btn-info" type="submit"><span class="btn-label">SAVE TPA DATA</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-                </form>
-                <div class="mt-2 text-[10px] opacity-50">A TPA amount different from the system amount automatically raises the configured approval with a full before/after audit.</div>
-              </td>
-            </tr>
-            {% endif %}
-          {% empty %}
-            <tr><td colspan="9" class="py-12 text-center opacity-50">No member records were extracted. This request cannot be processed.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    {% if can_edit %}
-      {% if endorsement.status == "DRAFT" or endorsement.status == "NEEDS_INFO" or endorsement.status == "REJECTED" or endorsement.status == "TPA_QUERY" %}
-      <section class="se-panel">
-        <div class="se-panel-head">
-          <div><div class="se-eyebrow">Intake / correction</div><div class="se-panel-title mt-1">FILES & MANUAL MEMBER ENTRY</div></div>
-          <span class="badge badge-outline badge-warning badge-xs">THIS ENDORSEMENT ONLY</span>
-        </div>
-        <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,.6fr)]">
-          <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_supplemental_upload' endorsement.pk %}">
-            {% csrf_token %}
-            <div class="se-dropzone min-h-[12rem]">
-              <input class="portal-file-input" data-drop-input="true" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
-              <div class="w-full text-center">
-                <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
-                <strong class="font-mono text-xs tracking-wider">DROP CORRECTION FILES</strong>
-                <div class="mt-2 text-[10px] opacity-55">Excel/CSV remain structured sources. PDF/images selected together are combined as one evidence bundle, including separate front/back ID files.</div>
-                <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">BROWSE FILES</button>
-                <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No files selected</div>
-              </div>
-              <div class="se-file-list w-full"></div>
-            </div>
-            <div class="mt-3 text-right">
-              <button class="btn btn-primary btn-sm" type="submit"><span class="btn-label"><i class="bi bi-cloud-check"></i>APPLY FILES</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-            </div>
-          </form>
-
-          <div class="space-y-3">
-            <form method="post" action="{% url 'endorsement_item_add' endorsement.pk %}" class="rounded-box border border-base-content/10 bg-base-200/50 p-4">
-              {% csrf_token %}
-              <div class="se-eyebrow">Manual intake</div>
-              <div class="mt-2 text-xs font-semibold">Add another member manually</div>
-              <div class="mt-3 grid gap-2">
-                <label class="se-field"><span>Full name</span>{{ add_item_form.full_name }}</label>
-                <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Member no.</span>{{ add_item_form.member_no }}</label><label class="se-field"><span>Employee no.</span>{{ add_item_form.employee_no }}</label></div>
-                <label class="se-field"><span>Civil / National ID</span>{{ add_item_form.national_id }}</label>
-                <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Relationship</span>{{ add_item_form.relationship }}</label><label class="se-field"><span>Gender</span>{{ add_item_form.gender }}</label></div>
-                <label class="se-field"><span>Date of birth</span>{{ add_item_form.date_of_birth }}</label>
-                <label class="se-field"><span>Plan</span>{{ add_item_form.plan }}</label>
-                <label class="se-field"><span>Effective date</span>{{ add_item_form.effective_date }}</label>
-              </div>
-              <button class="btn btn-primary btn-sm mt-3 w-full" type="submit"><i class="bi bi-person-plus"></i>ADD MEMBER</button>
-            </form>
-            <div class="rounded-box border border-base-content/10 bg-base-200/50 p-4">
-            <div class="se-eyebrow">How matching works</div>
-            <ol class="mt-3 space-y-3 text-xs">
-              <li class="flex gap-2"><span class="badge badge-primary badge-xs">1</span><span><strong>Existing unique member:</strong> non-empty values from the uploaded row update that member.</span></li>
-              <li class="flex gap-2"><span class="badge badge-success badge-xs">2</span><span><strong>No existing match:</strong> SmartEndorse adds a new member row to this endorsement.</span></li>
-              <li class="flex gap-2"><span class="badge badge-warning badge-xs">3</span><span><strong>Ambiguous match:</strong> nothing is changed; the row is left for manual review.</span></li>
-            </ol>
-            <div class="mt-4 text-[10px] leading-4 opacity-50">Match priority: Civil ID → member no. → employee no. → full name + date of birth.</div>
-            </div>
-          </div>
-        </div>
-      </section>
-      {% endif %}
-    {% endif %}
-
-    {% if resolution_rows %}
-    <section class="se-panel">
-      <div class="se-panel-head"><div><div class="se-eyebrow">Recovery ledger</div><div class="se-panel-title mt-1">RESOLVED / CHANGED RECORDS</div></div></div>
-      <div class="overflow-x-auto">
-        <table class="se-table"><thead><tr><th>When</th><th>Action</th><th>Before / source</th><th>After / filled</th></tr></thead>
-          <tbody>{% for row in resolution_rows %}<tr><td class="mono whitespace-nowrap">{{ row.created_at|date:"d M H:i" }}</td><td>{{ row.description }}</td><td><div class="max-w-md break-all text-[10px]">{{ row.before_or_source }}</div></td><td><div class="max-w-md break-all text-[10px]">{{ row.after_or_filled }}</div></td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-    </section>
-    {% endif %}
-
-    <section class="se-panel">
-      <div class="se-panel-head"><div><div class="se-eyebrow">Communication</div><div class="se-panel-title mt-1">QUERIES & RESPONSES</div></div></div>
-      <div class="divide-y divide-base-content/10">
-      {% for query in endorsement.queries.all %}
-        <div class="p-4">
-          <div class="flex flex-wrap justify-between gap-2"><strong class="text-sm">{{ query.subject }}</strong><span class="font-mono text-[10px] opacity-45">{{ query.created_at|date:"d M H:i" }}</span></div>
-          <p class="mt-2 text-xs opacity-70">{{ query.message }}</p>
-          {% if query.response %}
-            <div class="mt-3 border-l-2 border-success bg-success/5 p-3 text-xs"><strong class="text-success">RESPONSE</strong><div class="mt-1">{{ query.response }}</div></div>
-          {% elif current_profile.organization_id == query.assigned_organization_id %}
-            <form method="post" action="{% url 'endorsement_query_answer' endorsement.pk query.pk %}" class="mt-3">
-              {% csrf_token %}
-              <div class="se-field"><label>Response</label>{{ response_form.response }}</div>
-              <button class="btn btn-primary btn-sm mt-2" type="submit"><span class="btn-label">SEND RESPONSE</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-            </form>
-          {% else %}
-            <span class="se-status se-status-warn mt-3">Awaiting response</span>
-          {% endif %}
-        </div>
-      {% empty %}<div class="p-6 text-center text-xs opacity-45">No queries have been raised.</div>{% endfor %}
-      </div>
-    </section>
-  </div>
-
-  <aside class="min-w-0 space-y-4">
-    <section class="se-panel">
-      <div class="se-panel-head"><div><div class="se-eyebrow">Runtime</div><div class="se-panel-title mt-1">SLA & ROUTING</div></div><i class="bi bi-router text-primary"></i></div>
-      <div class="divide-y divide-base-content/10 px-4 py-1 text-xs">
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">TPA</span><strong class="text-right">{{ endorsement.policy.tpa.name|default:"Not applicable" }}</strong></div>
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">SLA due</span><strong class="text-right font-mono">{% if endorsement.current_sla_due_at %}{{ endorsement.current_sla_due_at|date:"d M Y H:i" }}{% else %}—{% endif %}</strong></div>
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">Validation</span><strong>{{ endorsement.validation_score }}%</strong></div>
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">Requester</span><strong class="text-right">{{ endorsement.requester.get_full_name|default:endorsement.requester.username }}</strong></div>
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">External ref.</span><strong class="break-all text-right">{{ endorsement.external_reference|default:"—" }}</strong></div>
-        <div class="flex justify-between gap-4 py-3"><span class="opacity-50">Policy expiry</span><strong class="font-mono">{{ endorsement.policy.effective_to|date:"d M Y" }}</strong></div>
-      </div>
-    </section>
-
-    {% if approvals %}
-    <section class="se-panel">
-      <div class="se-panel-head"><div><div class="se-eyebrow">Decision queue</div><div class="se-panel-title mt-1">APPROVALS</div></div><span class="badge badge-warning badge-sm">{{ approvals|length }}</span></div>
-      <div class="divide-y divide-base-content/10">
-      {% for approval in approvals %}
-        <div class="p-4">
-          <div class="flex items-start justify-between gap-2"><strong class="text-xs">{{ approval.get_approval_type_display }}</strong><span class="se-status {% if approval.status == 'APPROVED' %}se-status-ok{% elif approval.status == 'REJECTED' %}se-status-error{% else %}se-status-warn{% endif %}">{{ approval.get_status_display }}</span></div>
-          <p class="mt-2 text-[11px] opacity-65">{{ approval.reason }}</p>
-          {% if approval.old_amount != None %}<div class="mt-2 font-mono text-xs">{{ endorsement.currency }} {{ approval.old_amount|floatformat:3 }} → {{ endorsement.currency }} {{ approval.new_amount|floatformat:3 }}</div>{% endif %}
-          <div class="mt-2 text-[10px] opacity-45">Assigned to {{ approval.assigned_organization.name }}</div>
-          {% if approval.decision_comment %}<div class="mt-2 rounded bg-base-200 px-2 py-1.5 text-[10px]"><strong>Decision comment:</strong> {{ approval.decision_comment }}</div>{% endif %}
-          {% if approval.status == "PENDING" and approval.can_decide_for_user %}
-          <form method="post" action="{% url 'endorsement_approval' endorsement.pk approval.pk %}" class="mt-3">
-            {% csrf_token %}
-            <textarea class="textarea textarea-bordered w-full" name="comment" rows="2" placeholder="Approval note / mandatory rejection reason"></textarea>
-            <div class="mt-2 grid grid-cols-2 gap-2"><button class="btn btn-success btn-sm" type="submit" name="decision" value="approve">APPROVE</button><button class="btn btn-error btn-outline btn-sm" type="submit" name="decision" value="reject">REJECT</button></div>
-          </form>
-          {% endif %}
-        </div>
-      {% endfor %}
-      </div>
-    </section>
-    {% endif %}
-
-    {% if can_tpa_process or can_insurer_operate %}
-    <section class="se-panel">
-      <div class="se-panel-head">
-        <div><div class="se-eyebrow">Next workflow step</div><div class="se-panel-title mt-1">PROCESSING ACTIONS</div></div>
-        <i class="bi bi-signpost-split text-primary"></i>
-      </div>
-      <div class="space-y-4 p-4">
-        {% if endorsement.status == "SENT_TO_TPA" %}
-        <div class="rounded-box border border-info/25 bg-info/5 p-3">
-          <div class="text-xs font-semibold">Start work on this endorsement</div>
-          <div class="mt-1 text-[10px] leading-4 opacity-55">Use this when your team has accepted the case and is beginning processing.</div>
-          <form method="post" action="{% url 'endorsement_start' endorsement.pk %}" class="mt-3">
-            {% csrf_token %}
-            <button class="btn btn-primary btn-sm w-full" type="submit"><span class="btn-label"><i class="bi bi-play-circle"></i>START PROCESSING</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-          </form>
-        </div>
-        {% endif %}
-
-        {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
-        <div class="rounded-box border border-error/25 bg-error/5 p-3">
-          <div class="text-xs font-semibold">Reject and return for correction</div>
-          <div class="mt-1 text-[10px] leading-4 opacity-55">Use this only when the endorsement cannot be accepted. A rejection reason is mandatory and becomes part of the audit trail.</div>
-          <form method="post" action="{% url 'endorsement_tpa_reject' endorsement.pk %}" class="mt-3 space-y-2">
-            {% csrf_token %}
-            <textarea class="textarea textarea-bordered w-full" name="reason" rows="2" placeholder="Mandatory rejection reason" required></textarea>
-            <button class="btn btn-error btn-outline btn-sm w-full" type="submit"><i class="bi bi-x-octagon"></i>REJECT & RETURN</button>
-          </form>
-        </div>
-        {% endif %}
-
-        {% if endorsement.status != "COMPLETED" and endorsement.status != "CANCELLED" and endorsement.status != "REJECTED" %}
-        <div class="rounded-box border border-success/25 bg-success/5 p-3">
-          <div class="text-xs font-semibold">Complete the endorsement</div>
-          <div class="mt-1 text-[10px] leading-4 opacity-55">Use only after all member rows are processed and the TPA/core system has returned its reference.</div>
-          <form method="post" action="{% url 'endorsement_complete' endorsement.pk %}" class="mt-3 space-y-2">
-            {% csrf_token %}
-            <div class="se-field">
-              <label>TPA / core completion reference</label>
-              <input class="input input-bordered w-full" name="external_reference" placeholder="Example: TPA-2026-001284">
-            </div>
-            <button class="btn btn-success btn-sm w-full" type="submit"><span class="btn-label"><i class="bi bi-check-circle"></i>{% if can_tpa_process %}APPROVE & COMPLETE{% else %}CONFIRM COMPLETION{% endif %}</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-          </form>
-        </div>
-
-        <div class="rounded-box border border-warning/25 bg-warning/5 p-3">
-          <div class="text-xs font-semibold">Send the requester a clarification</div>
-          <div class="mt-1 text-[10px] leading-4 opacity-55">Use this when processing cannot continue because information, a document, or a correction is required.</div>
-          <form method="post" action="{% url 'endorsement_query' endorsement.pk %}" class="mt-3 space-y-2">
-            {% csrf_token %}
-            <div class="se-field"><label>What is required?</label>{{ query_form.subject }}<span class="helptext">Short title, for example “Missing Civil ID” or “Confirm effective date”.</span></div>
-            <div class="se-field"><label>Instructions to the requester</label>{{ query_form.message }}<span class="helptext">Explain exactly what is missing or incorrect and what the requester should provide.</span></div>
-            <button class="btn btn-warning btn-outline btn-sm w-full" type="submit"><span class="btn-label"><i class="bi bi-chat-left-text"></i>SEND CLARIFICATION REQUEST</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
-    </section>
-    {% endif %}
-
-    <section class="se-panel">
-      <div class="se-panel-head"><div><div class="se-eyebrow">Source registry</div><div class="se-panel-title mt-1">ATTACHMENTS</div></div></div>
-      <div class="divide-y divide-base-content/10">
-      {% for attachment in endorsement.attachments.all %}
-        <div class="p-3">
-          <div class="flex items-start justify-between gap-2"><div class="min-w-0"><strong class="block truncate text-xs">{{ attachment.original_name }}</strong><div class="mt-1 text-[10px] opacity-45">{{ attachment.get_kind_display }}{% if attachment.is_supplemental %} · Supplemental{% endif %}</div></div>{% if attachment.processed %}<span class="se-status se-status-ok">Processed</span>{% else %}<span class="se-status se-status-warn">Exception</span>{% endif %}</div>
-          {% if attachment.processing_error %}<div class="mt-2 text-[10px] text-error">{{ attachment.processing_error }}</div>{% endif %}
-          <details class="mt-2"><summary class="cursor-pointer text-[10px] font-bold uppercase tracking-wider opacity-55">Stored extraction JSON</summary><pre class="se-json mt-2">{{ attachment.extracted_payload }}</pre></details>
-        </div>
-      {% empty %}<div class="p-5 text-center text-xs opacity-45">No attachments.</div>{% endfor %}
-      </div>
-    </section>
-  </aside>
-</div>
 
 <section class="se-panel mt-4" id="audit-trail">
-  <div class="se-panel-head"><div><div class="se-eyebrow">Immutable operational history</div><div class="se-panel-title mt-1">COMPLETE AUDIT TRAIL</div></div><i class="bi bi-clock-history text-primary"></i></div>
-  <div class="se-timeline">
-    {% for event in endorsement.events.all %}
-    <div class="se-timeline-item">
-      <div class="font-mono text-[10px] opacity-45">{{ event.created_at|date:"d M Y H:i:s" }}<div>{% if event.actor %}{{ event.actor.username }}{% else %}AUTOMATION{% endif %}</div></div>
-      <div>
-        <strong class="text-xs">{{ event.description|default:event.event_type }}</strong>
-        {% if event.from_status or event.to_status %}<div class="mt-1 font-mono text-[10px] opacity-45">{{ event.from_status|default:"—" }} → {{ event.to_status|default:"—" }}</div>{% endif %}
-        {% if event.payload %}<details class="mt-2"><summary class="cursor-pointer text-[10px] uppercase tracking-wider opacity-50">Event data</summary><pre class="se-json mt-2">{{ event.payload }}</pre></details>{% endif %}
+  <details>
+    <summary class="se-panel-head cursor-pointer list-none">
+      <div><div class="se-eyebrow">Immutable operational history</div><div class="se-panel-title mt-1">COMPLETE AUDIT TRAIL</div></div>
+      <i class="bi bi-clock-history text-primary"></i>
+    </summary>
+    <div class="se-timeline border-t border-base-content/10">
+      {% for event in endorsement.events.all %}
+      <div class="se-timeline-item">
+        <div class="font-mono text-[10px] opacity-45">{{ event.created_at|date:"d M Y H:i:s" }}<div>{% if event.actor %}{{ event.actor.username }}{% else %}AUTOMATION{% endif %}</div></div>
+        <div>
+          <strong class="text-xs">{{ event.description|default:event.event_type }}</strong>
+          {% if event.from_status or event.to_status %}<div class="mt-1 font-mono text-[10px] opacity-45">{{ event.from_status|default:"—" }} → {{ event.to_status|default:"—" }}</div>{% endif %}
+          {% if event.payload %}<details class="mt-2"><summary class="cursor-pointer text-[10px] uppercase tracking-wider opacity-50">Event data</summary><pre class="se-json mt-2">{{ event.payload }}</pre></details>{% endif %}
+        </div>
       </div>
+      {% empty %}<div class="p-6 text-center text-xs opacity-45">No workflow events.</div>{% endfor %}
     </div>
-    {% empty %}<div class="p-6 text-center text-xs opacity-45">No workflow events.</div>{% endfor %}
-  </div>
+  </details>
 </section>
 {% endblock %}
