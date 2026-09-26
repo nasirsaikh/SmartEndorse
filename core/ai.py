@@ -322,6 +322,7 @@ class AIService:
     def _passport_fields_from_mrz(self, text):
         lines = []
         for raw in str(text or "").splitlines():
+            raw = re.sub(r"(?i)^\s*MRZ\s*[12]?\s*[:=\-]?\s*", "", raw)
             compact = re.sub(r"\s+", "", raw.upper())
             if len(compact) >= 30 and "<" in compact:
                 lines.append(compact)
