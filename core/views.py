@@ -396,6 +396,11 @@ def request_detail(request, pk):
         "approval": sum(i.validation_status == EndorsementItem.ValidationStatus.APPROVAL_REQUIRED for i in items),
     }
     approvals = list(endorsement.approvals.all())
+    latest_rejection = next(
+        (approval for approval in sorted(approvals, key=lambda x: x.updated_at, reverse=True)
+         if approval.status == EndorsementApproval.Status.REJECTED and approval.decision_comment),
+        None,
+    )
     for approval in approvals:
         approval.can_decide_for_user = can_decide_approval(request.user, approval)
 
@@ -455,6 +460,7 @@ def request_detail(request, pk):
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
         "sla_rows": _workflow_sla_rows(endorsement),
+        "latest_rejection": latest_rejection,
         "add_item_form": EndorsementItemCorrectionForm(instance=EndorsementItem(request=endorsement, effective_date=endorsement.effective_date)),
         "resolution_rows": resolution_rows,
         "member_issues": member_issues,
@@ -581,6 +587,14 @@ def edit_item(request, pk, item_id):
     endorsement = _get_accessible_request(request.user, pk)
     if not can_edit_request(request.user, endorsement):
         raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.error(request, "Member data can only be edited during intake/correction.")
+        return redirect("endorsement_detail", pk=pk)
     item = get_object_or_404(endorsement.items.select_related("plan", "request__policy"), pk=item_id)
     ocr_form = ItemOCRFillForm()
     ocr_source = None
