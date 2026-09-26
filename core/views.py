@@ -316,6 +316,41 @@ def request_detail(request, pk):
     for approval in approvals:
         approval.can_decide_for_user = can_decide_approval(request.user, approval)
 
+    member_issues = []
+    known_validation_errors = set()
+    for item in items:
+        member_label = item.full_name or item.member_no or item.employee_no or item.national_id or f"Item {item.pk}"
+        for error in item.validation_errors or []:
+            member_issues.append({
+                "item": item,
+                "member_label": member_label,
+                "error": error,
+            })
+            known_validation_errors.add(f'Item {item.pk}: {error}')
+            known_validation_errors.add(f'Member "{member_label}" (Item {item.pk}): {error}')
+
+    document_issues = []
+    for attachment in endorsement.attachments.all():
+        if not attachment.processing_error:
+            continue
+        payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
+        optional_ocr = payload.get("usage") == "item_ocr_preview"
+        document_issues.append({
+            "attachment": attachment,
+            "error": attachment.processing_error,
+            "optional_ocr": optional_ocr,
+            "blocking": not optional_ocr,
+        })
+        known_validation_errors.add(f"{attachment.original_name}: {attachment.processing_error}")
+        known_validation_errors.add(
+            f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}'
+        )
+
+    request_issues = [
+        error for error in (endorsement.validation_errors or [])
+        if error not in known_validation_errors
+    ]
+
     resolution_rows = []
     for event in endorsement.events.filter(
         event_type__in=[
@@ -337,6 +372,10 @@ def request_detail(request, pk):
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": _wizard(endorsement), "approvals": approvals,
         "resolution_rows": resolution_rows,
+        "member_issues": member_issues,
+        "document_issues": document_issues,
+        "request_issues": request_issues,
+        "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit_request(request.user, endorsement),
         "can_delete_items": can_edit_request(request.user, endorsement) and endorsement.status in {
             EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO,
@@ -344,6 +383,64 @@ def request_detail(request, pk):
         "can_tpa_process": can_tpa_process(request.user, endorsement),
         "can_insurer_operate": can_insurer_operate(request.user, endorsement),
     })
+
+
+@login_required
+def revalidate_request(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.warning(request, "Revalidation is only available while the endorsement is still being corrected.")
+        return redirect("endorsement_detail", pk=pk)
+
+    WorkflowService.revalidate_after_correction(endorsement, request.user)
+    endorsement.refresh_from_db()
+    if endorsement.validation_errors:
+        messages.warning(request, f"Revalidation completed with {len(endorsement.validation_errors)} blocking issue(s).")
+    else:
+        messages.success(request, "Revalidation passed. No blocking validation issues remain.")
+    return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
+def remove_failed_attachment(request, pk, attachment_id):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_edit_request(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.TPA_QUERY,
+    }:
+        messages.error(request, "Failed documents can only be removed while the endorsement is in validation/correction.")
+        return redirect("endorsement_detail", pk=pk)
+
+    attachment = get_object_or_404(endorsement.attachments, pk=attachment_id)
+    if not attachment.processing_error:
+        messages.warning(request, "Only a failed document can be removed from this screen.")
+        return redirect("endorsement_detail", pk=pk)
+
+    name = attachment.original_name
+    attachment.delete()
+    WorkflowEvent.objects.create(
+        request=endorsement,
+        actor=request.user,
+        event_type="FAILED_ATTACHMENT_REMOVED",
+        description=f"Failed document {name} removed during validation.",
+        payload={"file_name": name},
+    )
+    WorkflowService.revalidate_after_correction(endorsement, request.user)
+    messages.success(request, f"{name} was removed and the endorsement was revalidated.")
+    return redirect("endorsement_detail", pk=pk)
 
 
 @login_required
@@ -367,6 +464,7 @@ def edit_item(request, pk, item_id):
                 original_name=upload.name,
                 kind=FileIntakeService.kind_for_name(upload.name),
                 is_supplemental=True,
+                extracted_payload={"usage": "item_ocr_preview", "target_item_id": item.pk},
             )
             try:
                 raw_rows, normalized_rows, metadata = FileIntakeService._extract(attachment)
@@ -408,6 +506,7 @@ def edit_item(request, pk, item_id):
                     "raw_rows": raw_rows,
                     "normalized_rows": normalized_rows,
                     **metadata,
+                    "usage": "item_ocr_preview",
                     "ocr_fill_target_item": item.pk,
                 })
                 attachment.processed = True
