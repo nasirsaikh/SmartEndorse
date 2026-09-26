@@ -12,6 +12,14 @@
     </div>
   </section>
 
+  {% if endorsement.status == "TPA_QUERY" and editable_intake %}
+  <div role="alert" class="alert alert-warning items-start">
+    <i class="bi bi-arrow-return-left mt-0.5"></i>
+    <div class="grow"><strong>Correction requested during TPA processing</strong><div class="mt-1 text-xs">Open Intake/Correction to edit member data or supporting files. The query remains visible below so you can also send the requested response.</div></div>
+    <a class="btn btn-warning btn-sm" href="?step=intake#workflow-stage">OPEN INTAKE / CORRECTION</a>
+  </div>
+  {% endif %}
+
   {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=False show_tpa_controls=True %}
 
   {% if current_step == "processing" %}
