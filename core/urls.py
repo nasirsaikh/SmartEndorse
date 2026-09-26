@@ -22,6 +22,7 @@ urlpatterns = [
     path("endorsements/<int:pk>/items/<int:item_id>/delete/", views.delete_item, name="endorsement_item_delete"),
     path("endorsements/<int:pk>/items/<int:item_id>/tpa/", views.tpa_update_item, name="endorsement_tpa_item"),
     path("endorsements/<int:pk>/approvals/<int:approval_id>/", views.decide_approval, name="endorsement_approval"),
+    path("endorsements/<int:pk>/message/", views.processing_message, name="endorsement_processing_message"),
     path("endorsements/<int:pk>/start/", views.start_processing, name="endorsement_start"),
     path("endorsements/<int:pk>/tpa-reject/", views.tpa_reject_request, name="endorsement_tpa_reject"),
     path("endorsements/<int:pk>/complete/", views.complete_request, name="endorsement_complete"),
