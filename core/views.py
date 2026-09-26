@@ -427,10 +427,14 @@ def retry_failed_evidence_bundle(request, pk):
         messages.error(request, "Failed documents can only be retried while the endorsement is in validation/correction.")
         return redirect("endorsement_detail", pk=pk)
 
-    failed = [
-        attachment for attachment in endorsement.attachments.exclude(processing_error="")
-        if Path(attachment.original_name).suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
-    ]
+    failed = []
+    for attachment in endorsement.attachments.exclude(processing_error=""):
+        if Path(attachment.original_name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
+        if payload.get("usage") == "item_ocr_preview":
+            continue
+        failed.append(attachment)
     if not failed:
         messages.info(request, "There are no failed PDF/image documents to retry.")
         return redirect("endorsement_detail", pk=pk)
