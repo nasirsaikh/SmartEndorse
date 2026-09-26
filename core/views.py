@@ -558,6 +558,7 @@ def request_detail(request, pk):
         "request_issues": request_issues,
         "rejection_reason": rejection_reason,
         "risk_reasons": (endorsement.metadata or {}).get("insurer_review_reasons", []),
+        "is_medical": endorsement.policy.product == Policy.Product.GROUP_MEDICAL,
         "has_blocking_document_issues": any(issue["blocking"] for issue in document_issues),
         "can_edit": can_edit,
         "can_delete_items": can_edit and endorsement.status in {
@@ -833,7 +834,7 @@ def edit_item(request, pk, item_id):
     if request.method == "POST":
         before = {
             f: json_safe(getattr(item, f + "_id") if f == "plan" else getattr(item, f))
-            for f in ["member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "plan", "sum_assured", "effective_date"]
+            for f in ["member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date"]
         }
         form = EndorsementItemCorrectionForm(request.POST, instance=item)
         if form.is_valid():
