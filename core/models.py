@@ -226,6 +226,63 @@ class PolicyPlan(TimeStampedModel):
         return f"{self.policy.policy_number} / {self.code} - {self.name}"
 
 
+class AIExtractionProfile(TimeStampedModel):
+    class Task(models.TextChoices):
+        DOCUMENT_EXTRACTION = "DOCUMENT_EXTRACTION", "Document OCR / extraction"
+        STRUCTURED_MAPPING = "STRUCTURED_MAPPING", "Structured header mapping"
+
+    name = models.CharField(max_length=120, unique=True)
+    task = models.CharField(max_length=30, choices=Task.choices)
+    product = models.CharField(
+        max_length=30,
+        choices=Policy.Product.choices,
+        blank=True,
+        help_text="Leave blank for a global profile. Product-specific active profiles override the global profile.",
+    )
+    system_prompt = models.TextField(
+        blank=True,
+        help_text="Optional system instruction sent to the LLM before the extraction request.",
+    )
+    instructions = models.TextField(
+        blank=True,
+        help_text="Task-specific extraction instructions. Canonical field rules are appended automatically.",
+    )
+    field_aliases = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Optional field guidance, e.g. {"national_id": ["Civil ID", "Resident ID"], "plan_code": ["Plan", "Category"]}.',
+    )
+    priority = models.PositiveSmallIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("-priority", "name")
+
+    def __str__(self):
+        scope = self.get_product_display() if self.product else "Global"
+        return f"{self.name} / {self.get_task_display()} / {scope}"
+
+
+class AITrainingExample(TimeStampedModel):
+    profile = models.ForeignKey(AIExtractionProfile, on_delete=models.CASCADE, related_name="examples")
+    name = models.CharField(max_length=120)
+    input_text = models.TextField(
+        help_text="Representative OCR text, document wording, or structured source row/header.",
+    )
+    expected_output = models.JSONField(
+        default=list,
+        help_text="Expected canonical JSON array. This is inserted as a few-shot example for the LLM.",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=10)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.profile.name} / {self.name}"
+
+
 class PolicyAccess(TimeStampedModel):
     policy = models.ForeignKey(Policy, on_delete=models.CASCADE, related_name="access_grants")
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="policy_access")
