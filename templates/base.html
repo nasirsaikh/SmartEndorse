@@ -9,7 +9,9 @@
 
   <script>
     (() => {
-      const preference = "{% if current_profile %}{{ current_profile.color_mode }}{% else %}auto{% endif %}";
+      const serverPreference = "{% if current_profile %}{{ current_profile.color_mode }}{% else %}auto{% endif %}";
+      const savedPreference = localStorage.getItem("smartendorse-color-mode");
+      const preference = ["light", "dark", "auto"].includes(savedPreference) ? savedPreference : serverPreference;
       const resolved = preference === "auto"
         ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
         : preference;
@@ -73,7 +75,7 @@
             <button tabindex="0" class="btn btn-ghost h-auto min-h-0 gap-2 px-2 py-1.5" type="button">
               <div class="avatar placeholder">
                 <div class="w-8 rounded bg-primary text-primary-content">
-                  <span class="text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>
+                  {% if current_profile.photo %}<img src="{{ current_profile.photo.url }}" alt="{{ user.get_full_name|default:user.username }}" class="h-full w-full object-cover">{% else %}<span class="text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>{% endif %}
                 </div>
               </div>
               <div class="hidden text-left lg:block">
@@ -88,6 +90,7 @@
                 <div class="text-xs opacity-60">{{ current_profile.get_role_display }}</div>
               </div>
               <div class="divider my-1"></div>
+              <a class="btn btn-ghost btn-sm w-full justify-start" href="{% url 'profile' %}"><i class="bi bi-person-circle"></i>My profile</a>
               {% if user.is_staff %}
               <a class="btn btn-ghost btn-sm w-full justify-start" href="/admin/"><i class="bi bi-sliders"></i>Django administration</a>
               {% endif %}
