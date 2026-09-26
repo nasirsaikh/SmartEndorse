@@ -91,8 +91,13 @@ class AIService:
         )
 
     @staticmethod
-    def _select_vision_provider():
-        return AIProviderConfig.objects.filter(is_active=True, supports_vision=True).order_by("-updated_at", "-pk").first()
+    def _select_vision_provider(exclude_pk=None, exclude_glm_ocr=False):
+        qs = AIProviderConfig.objects.filter(is_active=True, supports_vision=True)
+        if exclude_pk:
+            qs = qs.exclude(pk=exclude_pk)
+        if exclude_glm_ocr:
+            qs = qs.exclude(model_name__icontains="glm-ocr")
+        return qs.order_by("-updated_at", "-pk").first()
 
     @property
     def available(self):
@@ -176,7 +181,31 @@ class AIService:
         encoded = base64.b64encode(content).decode("ascii")
 
         if self._uses_ocr_text_pipeline():
-            ocr_text = self._vision_ocr_text(encoded, mime)
+            try:
+                ocr_text = self._vision_ocr_text(encoded, mime)
+            except RuntimeError as exc:
+                if self._is_glm_ollama_repeat_error(exc):
+                    fallback_config = self._select_vision_provider(
+                        exclude_pk=self.config.pk,
+                        exclude_glm_ocr=True,
+                    )
+                    if fallback_config:
+                        fallback = AIService(
+                            config=fallback_config,
+                            product=self.product,
+                            context=self.context,
+                        )
+                        rows = fallback.extract_image_bytes(content, mime)
+                        self.last_profile = fallback.last_profile
+                        return rows
+                    raise RuntimeError(
+                        "GLM-OCR hit the known Ollama token-repeat regression. "
+                        "Ollama 0.34.1+ can return HTTP 500 'prediction aborted, token repeat limit reached' "
+                        "for GLM-OCR even when the document was read correctly. "
+                        "Use Ollama 0.34.0 for GLM-OCR or configure another active non-GLM vision provider "
+                        "as an OCR fallback."
+                    ) from exc
+                raise
             if not (ocr_text or "").strip():
                 raise ValueError("OCR model returned no readable text.")
 
@@ -202,6 +231,13 @@ class AIService:
         )
         return self._parse_json_array(
             self._vision(prompt, encoded, mime, system, response_schema=MEMBER_OUTPUT_SCHEMA)
+        )
+
+    def _is_glm_ollama_repeat_error(self, exc):
+        return (
+            self.config.provider == AIProviderConfig.Provider.OLLAMA
+            and "glm-ocr" in (self.config.model_name or "").lower()
+            and "token repeat limit reached" in str(exc).lower()
         )
 
     def _uses_ocr_text_pipeline(self):
@@ -249,12 +285,14 @@ class AIService:
         configured = dict(self.config.options or {})
         configured.pop("headers", None)
         configured.pop("keep_alive", None)
+        configured.pop("vision_pipeline", None)
         defaults = {
             "temperature": float(self.config.temperature),
         }
         if vision:
+            is_glm_ocr = "glm-ocr" in (self.config.model_name or "").lower()
             defaults.update({
-                "num_ctx": 4096,
+                "num_ctx": 8192 if is_glm_ocr else 4096,
                 "num_gpu": -1,
                 "num_predict": 1024,
             })

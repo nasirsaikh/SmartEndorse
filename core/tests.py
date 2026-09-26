@@ -621,7 +621,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         AIService(config=provider).extract_image_bytes(b"fake-image", "image/jpeg")
 
         payload = client.post.call_args.kwargs["json"]
-        self.assertEqual(payload["options"]["num_ctx"], 4096)
+        self.assertEqual(payload["options"]["num_ctx"], 8192)
         self.assertEqual(payload["options"]["num_gpu"], -1)
         self.assertEqual(payload["options"]["num_predict"], 1024)
         self.assertEqual(payload["keep_alive"], "15m")
@@ -736,6 +736,63 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(mapper_payload["model"], text_provider.model_name)
         self.assertIsInstance(mapper_payload["format"], dict)
         self.assertIn("items", mapper_payload["format"]["properties"])
+
+    @patch.object(AIService, "_vision")
+    @patch.object(
+        AIService,
+        "_vision_ocr_text",
+        side_effect=RuntimeError(
+            "Ollama /api/generate failed with HTTP 500 for model 'glm-ocr'. "
+            "prediction aborted, token repeat limit reached."
+        ),
+    )
+    def test_glm_repeat_error_falls_back_to_other_active_vision_provider(self, ocr_mock, vision_mock):
+        glm = AIProviderConfig.objects.create(
+            name="GLM OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        fallback = AIProviderConfig.objects.create(
+            name="Qwen Vision",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen3-vl:2b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        vision_mock.return_value = '{"items":[{"full_name":"Aisha"}]}'
+
+        rows = AIService(config=glm).extract_image_bytes(b"image", "image/jpeg")
+
+        self.assertEqual(rows[0]["full_name"], "Aisha")
+        self.assertTrue(ocr_mock.called)
+        self.assertTrue(vision_mock.called)
+
+    @patch.object(
+        AIService,
+        "_vision_ocr_text",
+        side_effect=RuntimeError(
+            "Ollama /api/generate failed with HTTP 500 for model 'glm-ocr'. "
+            "prediction aborted, token repeat limit reached."
+        ),
+    )
+    def test_glm_repeat_error_explains_ollama_regression_when_no_fallback(self, _ocr_mock):
+        glm = AIProviderConfig.objects.create(
+            name="GLM OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Ollama 0.34.1") as error:
+            AIService(config=glm).extract_image_bytes(b"image", "image/jpeg")
+
+        self.assertIn("Use Ollama 0.34.0", str(error.exception))
 
     def test_json_parser_recovers_first_valid_value_from_concatenated_json(self):
         content = (
