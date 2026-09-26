@@ -69,7 +69,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
     gender = forms.ChoiceField(required=False, choices=GENDER_CHOICES)
     plan = forms.ModelChoiceField(required=False, queryset=PolicyPlan.objects.none(), empty_label="Select plan")
     annual_salary = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
-    sum_assured = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
+    sum_assured = forms.DecimalField(required=False, max_digits=14, decimal_places=3, disabled=True)
     attachments = MultiFileField(required=False, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
         "class": "portal-file-input",
@@ -92,7 +92,16 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
         })
         policy_id = self.data.get("policy") or self.initial.get("policy")
         if policy_id:
-            self.fields["plan"].queryset = PolicyPlan.objects.filter(policy_id=policy_id, is_active=True)
+            self.fields["plan"].queryset = PolicyPlan.objects.filter(policy_id=policy_id, is_active=True).order_by("code")
+        self.fields["plan"].widget.attrs.update({
+            "data-plan-sum-assured": "true",
+            "data-plan-sum-url": "/policy-plans/sum-assured/",
+        })
+        self.fields["sum_assured"].widget.attrs.update({
+            "readonly": True,
+            "data-plan-sum-target": "true",
+            "placeholder": "Derived from selected plan",
+        })
         self.fields["effective_date"].initial = timezone.localdate()
         self.apply_bootstrap()
 
@@ -107,7 +116,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
             "gender": self.cleaned_data.get("gender", ""),
             "plan": self.cleaned_data.get("plan"),
             "annual_salary": self.cleaned_data.get("annual_salary"),
-            "sum_assured": self.cleaned_data.get("sum_assured"),
+            "sum_assured": self.cleaned_data.get("plan").sum_assured if self.cleaned_data.get("plan") and self.cleaned_data.get("plan").sum_assured is not None else None,
             "effective_date": self.cleaned_data.get("effective_date"),
             "extracted_data": {"source": "manual_entry"},
         }
