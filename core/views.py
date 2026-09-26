@@ -41,16 +41,16 @@ def _chart_html(qs):
     statuses = Counter(qs.values_list("status", flat=True))
     status_map = dict(EndorsementRequest.Status.choices)
     labels = [status_map.get(key, key) for key in statuses]
-    fig1 = go.Figure(data=[go.Bar(x=labels, y=list(statuses.values()))])
-    fig1.update_layout(title="Pipeline by status", height=330, margin=dict(l=30, r=20, t=55, b=40), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    fig1 = go.Figure(data=[go.Bar(x=labels, y=list(statuses.values()), marker_color="#55e6b0")])
+    fig1.update_layout(height=300, margin=dict(l=34, r=18, t=24, b=42), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", bargap=0.38)
 
     monthly = defaultdict(int)
     start = timezone.now() - timedelta(days=180)
     for created_at in qs.filter(created_at__gte=start).values_list("created_at", flat=True):
         monthly[created_at.strftime("%Y-%m")] += 1
     months = sorted(monthly)
-    fig2 = go.Figure(data=[go.Scatter(x=months, y=[monthly[month] for month in months], mode="lines+markers")])
-    fig2.update_layout(title="Endorsement volume - last 6 months", height=330, margin=dict(l=30, r=20, t=55, b=40), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    fig2 = go.Figure(data=[go.Scatter(x=months, y=[monthly[month] for month in months], mode="lines+markers", line=dict(color="#55e6b0", width=2), marker=dict(color="#f2b84b", size=7))])
+    fig2.update_layout(height=300, margin=dict(l=34, r=18, t=24, b=42), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     config = {"displayModeBar": False, "responsive": True}
     return fig1.to_html(full_html=False, include_plotlyjs=False, config=config), fig2.to_html(full_html=False, include_plotlyjs=False, config=config)
 
@@ -68,14 +68,26 @@ def dashboard(request):
         org_type = request.user.profile.organization.organization_type
     except Exception:
         org_type = ""
+    tpa_queue = qs.filter(status__in=[
+        EndorsementRequest.Status.SENT_TO_TPA,
+        EndorsementRequest.Status.TPA_IN_PROGRESS,
+        EndorsementRequest.Status.TPA_QUERY,
+    ]).count()
+    exceptions = qs.filter(status__in=[
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.FAILED,
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+    ]).count()
     return render(request, "dashboard.html", {
         "total": total, "completed": completed, "open_count": total - completed, "breached": breached,
         "stp_rate": round((stp / total * 100), 1) if total else 0, "premium": premium,
         "recent": qs.order_by("-created_at")[:10], "chart_status": chart_status, "chart_trend": chart_trend,
         "org_type": org_type, "policy_count": accessible_policies(request.user).count(),
-        "can_create": can_create_endorsement(request.user),
-        "tpa_queue": qs.filter(status__in=[EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY]).count(),
-        "exceptions": qs.filter(status__in=[EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.FAILED, EndorsementRequest.Status.PENDING_INSURER_APPROVAL, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL]).count(),
+        "can_create": can_create_endorsement(request.user), "tpa_queue": tpa_queue, "exceptions": exceptions,
+        "completion_rate": round((completed / total * 100), 1) if total else 0,
+        "exception_rate": round((exceptions / total * 100), 1) if total else 0,
+        "tpa_queue_rate": round((tpa_queue / total * 100), 1) if total else 0,
     })
 
 
