@@ -1,6 +1,11 @@
 from django import forms
 from django.utils import timezone
-from .models import EndorsementQuery, EndorsementRequest, Policy, PolicyPlan
+
+from .models import EndorsementItem, EndorsementQuery, EndorsementRequest, Policy, PolicyPlan
+from .services import platform_config
+
+
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 class MultiFileInput(forms.ClearableFileInput):
@@ -10,23 +15,48 @@ class MultiFileInput(forms.ClearableFileInput):
 class MultiFileField(forms.FileField):
     def clean(self, data, initial=None):
         single = super().clean
-        if isinstance(data, (list, tuple)):
-            return [single(item, initial) for item in data]
-        return [single(data, initial)] if data else []
+        items = list(data) if isinstance(data, (list, tuple)) else ([data] if data else [])
+        cleaned = [single(item, initial) for item in items]
+        cfg = platform_config()
+        max_bytes = cfg.maximum_upload_mb * 1024 * 1024
+        for upload in cleaned:
+            if upload.size > max_bytes:
+                raise forms.ValidationError(f"{upload.name} exceeds the {cfg.maximum_upload_mb} MB upload limit.")
+            from pathlib import Path
+            if Path(upload.name).suffix.lower() not in ALLOWED_EXTENSIONS:
+                raise forms.ValidationError(f"Unsupported file type: {upload.name}")
+        return cleaned
 
 
-class EndorsementCreateForm(forms.ModelForm):
+class StyledFormMixin:
+    def apply_bootstrap(self):
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.Select):
+                field.widget.attrs["class"] = "form-select searchable-select"
+            elif isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs["class"] = "form-check-input"
+            elif not isinstance(field.widget, forms.FileInput):
+                field.widget.attrs["class"] = "form-control"
+
+
+class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
     full_name = forms.CharField(required=False)
     member_no = forms.CharField(required=False, help_text="Required for deletion; optional for addition")
     employee_no = forms.CharField(required=False)
     national_id = forms.CharField(required=False)
     relationship = forms.CharField(required=False, initial="Employee")
     date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
-    gender = forms.ChoiceField(required=False, choices=[("", "---------"), ("Male", "Male"), ("Female", "Female")])
-    plan = forms.ModelChoiceField(required=False, queryset=PolicyPlan.objects.none())
+    gender = forms.ChoiceField(required=False, choices=[("", "Select gender"), ("Male", "Male"), ("Female", "Female")])
+    plan = forms.ModelChoiceField(required=False, queryset=PolicyPlan.objects.none(), empty_label="Select plan")
     annual_salary = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
     sum_assured = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
-    attachments = MultiFileField(required=False, widget=MultiFileInput(attrs={"accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg"}))
+    attachments = MultiFileField(required=False, widget=MultiFileInput(attrs={
+        "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
+        "class": "d-none",
+        "x-ref": "fileInput",
+        "@change": "addFiles($event.target.files)",
+        "multiple": True,
+    }))
 
     class Meta:
         model = EndorsementRequest
@@ -36,20 +66,16 @@ class EndorsementCreateForm(forms.ModelForm):
     def __init__(self, *args, policies=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["policy"].queryset = policies if policies is not None else Policy.objects.none()
+        self.fields["policy"].empty_label = "Search and select policy"
         self.fields["policy"].widget.attrs.update({
-            "hx-get": "/policy-plans/",
-            "hx-target": "#id_plan",
-            "hx-trigger": "change",
+            "hx-get": "/policy-plans/", "hx-target": "#id_plan", "hx-trigger": "change",
+            "data-placeholder": "Search policy...",
         })
         policy_id = self.data.get("policy") or self.initial.get("policy")
         if policy_id:
             self.fields["plan"].queryset = PolicyPlan.objects.filter(policy_id=policy_id, is_active=True)
         self.fields["effective_date"].initial = timezone.localdate()
-        for field in self.fields.values():
-            if isinstance(field.widget, forms.Select):
-                field.widget.attrs["class"] = "form-select"
-            elif not isinstance(field.widget, (forms.FileInput,)):
-                field.widget.attrs["class"] = "form-control"
+        self.apply_bootstrap()
 
     def manual_item_payload(self):
         return {
@@ -64,6 +90,7 @@ class EndorsementCreateForm(forms.ModelForm):
             "annual_salary": self.cleaned_data.get("annual_salary"),
             "sum_assured": self.cleaned_data.get("sum_assured"),
             "effective_date": self.cleaned_data.get("effective_date"),
+            "extracted_data": {"source": "manual_entry"},
         }
 
     def has_manual_item(self):
@@ -71,16 +98,75 @@ class EndorsementCreateForm(forms.ModelForm):
         return any([p["member_no"], p["full_name"], p["employee_no"], p["national_id"]])
 
 
-class QueryForm(forms.ModelForm):
+class BulkRecoveryForm(forms.Form):
+    attachments = MultiFileField(required=True, widget=MultiFileInput(attrs={
+        "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
+        "class": "d-none", "multiple": True,
+    }))
+
+
+
+class SupplementalUploadForm(forms.Form):
+    attachments = MultiFileField(required=True, widget=MultiFileInput(attrs={
+        "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
+        "class": "d-none", "multiple": True,
+    }))
+
+
+class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):
+    class Meta:
+        model = EndorsementItem
+        fields = (
+            "member_no", "employee_no", "national_id", "full_name", "relationship",
+            "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date",
+        )
+        widgets = {
+            "date_of_birth": forms.DateInput(attrs={"type": "date"}),
+            "effective_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.request_id:
+            self.fields["plan"].queryset = PolicyPlan.objects.filter(policy=self.instance.request.policy, is_active=True)
+        self.apply_bootstrap()
+
+
+class TPAItemProcessingForm(StyledFormMixin, forms.Form):
+    card_number = forms.CharField(required=True, max_length=100)
+    amount = forms.DecimalField(required=True, max_digits=14, decimal_places=3)
+
+    def __init__(self, *args, item=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if item and not self.is_bound:
+            self.initial["card_number"] = item.card_number
+            self.initial["amount"] = item.tpa_premium_amount if item.tpa_premium_amount is not None else item.premium_impact
+        self.apply_bootstrap()
+
+
+class ApprovalDecisionForm(StyledFormMixin, forms.Form):
+    decision = forms.ChoiceField(choices=[("approve", "Approve"), ("reject", "Reject")])
+    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_bootstrap()
+
+
+class QueryForm(StyledFormMixin, forms.ModelForm):
     class Meta:
         model = EndorsementQuery
         fields = ("subject", "message")
         widgets = {"message": forms.Textarea(attrs={"rows": 3})}
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["subject"].widget.attrs["class"] = "form-control"
-        self.fields["message"].widget.attrs["class"] = "form-control"
+        self.apply_bootstrap()
 
 
-class QueryResponseForm(forms.Form):
-    response = forms.CharField(widget=forms.Textarea(attrs={"rows": 3, "class": "form-control"}))
+class QueryResponseForm(StyledFormMixin, forms.Form):
+    response = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_bootstrap()

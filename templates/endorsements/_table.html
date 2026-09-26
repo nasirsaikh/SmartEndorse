@@ -1,22 +1,18 @@
 <div class="table-responsive">
 <table class="table align-middle mb-0">
-  <thead>
-    <tr><th>Reference</th><th>Policy / client</th><th>Product</th><th>Request</th><th>Status</th><th>SLA due</th><th class="text-end">Premium impact</th></tr>
-  </thead>
+  <thead><tr><th>Reference</th><th>Policy / client</th><th>Product</th><th>Request</th><th>Status</th><th>SLA due</th><th class="text-end">Premium impact</th></tr></thead>
   <tbody>
   {% for item in endorsements %}
     <tr>
-      <td><a href="{% url 'endorsement_detail' item.pk %}" class="fw-semibold text-decoration-none">{{ item.reference }}</a><div class="small text-secondary">{{ item.created_at|date:"d M Y H:i" }}</div></td>
-      <td>{{ item.policy.policy_number }}<div class="small text-secondary">{{ item.policy.client.name }}</div></td>
+      <td><a href="{% url 'endorsement_detail' item.pk %}" class="fw-semibold text-decoration-none">{{ item.reference }}</a><div class="small text-body-secondary">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+      <td>{{ item.policy.policy_number }}<div class="small text-body-secondary">{{ item.policy.client.name }}</div></td>
       <td>{{ item.policy.get_product_display }}</td>
-      <td>{{ item.get_endorsement_type_display }}<div class="small text-secondary">{{ item.items.count }} member row{{ item.items.count|pluralize }}</div></td>
+      <td>{{ item.get_endorsement_type_display }}<div class="small text-body-secondary">{{ item.items.count }} member row{{ item.items.count|pluralize }}</div></td>
       <td><span class="status-pill status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-      <td>{% if item.sla_breached %}<span class="text-danger fw-semibold">Breached</span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M Y H:i" }}{% else %}—{% endif %}</td>
+      <td>{% if item.sla_breached %}<span class="text-danger fw-semibold"><i class="bi bi-exclamation-octagon me-1"></i>Breached</span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M Y H:i" }}{% else %}—{% endif %}</td>
       <td class="text-end">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
     </tr>
-  {% empty %}
-    <tr><td colspan="7" class="text-center py-5 text-secondary">No requests match the filters.</td></tr>
-  {% endfor %}
+  {% empty %}<tr><td colspan="7" class="text-center py-5 text-body-secondary"><i class="bi bi-inbox fs-2 d-block mb-2"></i>No requests match the filters.</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
