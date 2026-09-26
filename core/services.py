@@ -1613,6 +1613,16 @@ class WorkflowService:
         )
 
         if not approve:
+            if approval.approval_type != EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE:
+                request_obj.approvals.filter(
+                    status=EndorsementApproval.Status.PENDING
+                ).exclude(pk=approval.pk).update(
+                    status=EndorsementApproval.Status.REJECTED,
+                    decided_by=actor,
+                    decided_at=timezone.now(),
+                    decision_comment="Superseded because another insurer approval was rejected. A corrected resubmission will create fresh approvals.",
+                )
+
             if approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE and approval.item_id:
                 approval.item.tpa_premium_amount = approval.old_amount
                 approval.item.tpa_status = EndorsementItem.TPAStatus.PENDING
