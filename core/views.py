@@ -17,7 +17,7 @@ from .access import (
     can_decide_approval, can_edit_request, can_insurer_operate, can_tpa_process,
 )
 from .forms import (
-    ApprovalDecisionForm, BulkRecoveryForm, EndorsementCreateForm, EndorsementItemCorrectionForm,
+    ApprovalDecisionForm, AutoApprovalRuleForm, BulkRecoveryForm, EndorsementCreateForm, EndorsementItemCorrectionForm,
     ItemOCRFillForm, ProfileForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
 )
 from .models import (
@@ -548,6 +548,7 @@ def request_detail(request, pk):
         "supplemental_form": SupplementalUploadForm(),
         "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
+        "auto_rule_form": AutoApprovalRuleForm(policy=endorsement.policy),
         "item_form": item_form,
         "item_kpis": item_kpis,
         "wizard_steps": wizard_steps,
@@ -1027,6 +1028,32 @@ def tpa_update_item(request, pk, item_id):
     else:
         messages.error(request, _form_error_text(form))
     return redirect(f"/endorsements/{pk}/?step=tpa")
+
+@login_required
+def update_approval_rules(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_insurer_operate(request.user, endorsement):
+        raise PermissionDenied
+    form = AutoApprovalRuleForm(request.POST, policy=endorsement.policy)
+    if form.is_valid():
+        form.save()
+        WorkflowEvent.objects.create(
+            request=endorsement,
+            actor=request.user,
+            event_type="AUTO_APPROVAL_RULES_UPDATED",
+            description="Insurer auto-approval rules updated.",
+            payload={
+                "auto_stp": endorsement.policy.auto_stp,
+                "rules": endorsement.policy.auto_approval_rules,
+            },
+        )
+        messages.success(request, "Auto-approval rules updated for this policy. They apply the next time an endorsement is validated/submitted.")
+    else:
+        messages.error(request, _form_error_text(form))
+    return redirect(f"/endorsements/{pk}/?step=approval")
+
 
 @login_required
 def decide_approval(request, pk, approval_id):
