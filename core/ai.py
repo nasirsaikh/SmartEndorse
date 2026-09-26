@@ -419,11 +419,12 @@ class AIService:
         except Exception:
             return None, None
 
-    def extract_form_fields_from_text(self, text):
-        text = str(text or "").strip()
-        if not text:
-            raise ValueError("OCR returned no readable text.")
-
+    def _deterministic_form_fields_from_text(self, text):
+        """
+        Conservative fallback only. The primary form-fill path is semantic LLM
+        mapping so document nomenclature/layout does not need to match our field
+        names.
+        """
         aliases = self._form_aliases()
         all_aliases = [alias for values in aliases.values() for alias in values]
         row = {key: None for key in CANONICAL_FIELDS}
@@ -445,22 +446,131 @@ class AIService:
         row["plan_code"] = self._resolve_form_plan(row.get("plan_code"), text)
         row["_source_raw"] = {
             "ocr_text": text[:12000],
-            "extraction_mode": "direct_form_fill",
-            "document_type": "passport" if passport else "member_document",
+            "extraction_mode": "deterministic_fallback",
+            "document_type": "passport" if passport else "unknown",
             "passport": passport,
         }
+        return row
 
+    def _semantic_form_mapper(self):
+        current = self.config
+        if current and not current.supports_vision:
+            return self
+        mapper_config = self._select_text_provider(exclude_pk=current.pk if current else None)
+        if not mapper_config:
+            return None
+        return AIService(config=mapper_config, product=self.product, context=self.context)
+
+    def _semantic_form_prompt(self, text):
+        profile = self._profile(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+        admin_instructions = profile.instructions.strip() if profile and profile.instructions else ""
+        aliases = profile.field_aliases if profile and isinstance(profile.field_aliases, dict) else {}
+        examples = []
+        if profile:
+            for example in profile.examples.filter(is_active=True).order_by("sort_order", "id")[:5]:
+                examples.append({
+                    "source": example.input_text,
+                    "expected": example.expected_output,
+                })
+
+        valid_plans = self.context.get("valid_plans", []) if isinstance(self.context, dict) else []
+        return (
+            "You are filling ONE insurance member correction form from OCR/text extracted from an arbitrary document.\n"
+            "The source may be a passport, national ID, residence card, employee card, insurance schedule, certificate, "
+            "HR form, enrollment form, letter, table, spreadsheet-like text, or another document type.\n"
+            "IMPORTANT: field names, nomenclature, abbreviations, language, order and layout WILL vary. "
+            "Do not require exact labels. Determine semantic meaning from the document context.\n\n"
+            "Map only information genuinely supported by the source into these target fields:\n"
+            "- member_no: insurance/member/card membership identifier, not a passport/document number unless the source clearly says it is the member number.\n"
+            "- employee_no: employee/staff/personnel identifier.\n"
+            "- national_id: civil/national/resident identity number. Do NOT put a passport number here unless the source explicitly treats it as the national identity number.\n"
+            "- full_name: the covered/person/member full name. Combine separate given-name/surname components when appropriate.\n"
+            "- relationship: normalize semantically to Employee, Spouse or Child only when the relationship is supported.\n"
+            "- date_of_birth: the person's birth date, preferably YYYY-MM-DD.\n"
+            "- gender: normalize to Male or Female when supported.\n"
+            "- plan_code: insurance plan/class/category/benefit plan only. Never infer a plan from a person's name or unrelated class/category text.\n"
+            "- annual_salary: salary only if explicitly present.\n"
+            "- sum_assured: coverage/sum-assured value only if explicitly present.\n"
+            "- effective_date: insurance/member endorsement effective/addition/deletion date only; do not use passport issue/expiry dates.\n\n"
+            "Do not invent missing values. Unknown fields must be null. "
+            "Document-specific identifiers that do not map to a target field may remain unused.\n"
+            "Configured policy context follows; valid plan names/codes are hints for semantic matching, not required source labels:\n"
+            + json.dumps(self.context or {}, ensure_ascii=False, default=str)
+            + ("\n\nAdmin extraction guidance (helpful, not exhaustive):\n" + admin_instructions if admin_instructions else "")
+            + ("\n\nAdmin alias hints (examples only; other nomenclature is allowed):\n" + json.dumps(aliases, ensure_ascii=False, default=str) if aliases else "")
+            + ("\n\nFew-shot examples (patterns only; never copy their values):\n" + json.dumps(examples, ensure_ascii=False, default=str) if examples else "")
+            + "\n\nOCR / DOCUMENT TEXT:\n"
+            + text[:50000]
+        )
+
+    def _semantic_form_fields_from_text(self, text):
+        mapper = self._semantic_form_mapper()
+        if not mapper:
+            return None
+
+        system_prompt = (
+            "You are a semantic document-understanding engine for insurance member data. "
+            "Interpret meaning, not exact field labels. Use only evidence present in the source. "
+            "Return the requested structured result only."
+        )
+        prompt = mapper._semantic_form_prompt(text)
+        response = mapper._chat(prompt, system_prompt, response_schema=MEMBER_OUTPUT_SCHEMA)
+        rows = mapper._parse_json_array(response)
+        if not rows:
+            return None
+
+        row = rows[0] if isinstance(rows[0], dict) else {}
+        result = {key: row.get(key) for key in CANONICAL_FIELDS}
+        result["plan_code"] = mapper._resolve_form_plan(result.get("plan_code"), text)
+        result["_source_raw"] = {
+            "ocr_text": text[:12000],
+            "extraction_mode": "semantic_llm",
+            "mapper_provider": mapper.config.name if mapper.config else None,
+            "mapper_model": mapper.config.model_name if mapper.config else None,
+        }
+        self.last_profile = mapper.last_profile
+        return result
+
+    def extract_form_fields_from_text(self, text):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("OCR returned no readable text.")
+
+        semantic_error = None
+        try:
+            row = self._semantic_form_fields_from_text(text)
+            if row:
+                meaningful = {
+                    key: value
+                    for key, value in row.items()
+                    if key != "_source_raw" and value not in (None, "")
+                }
+                if meaningful:
+                    return row
+        except Exception as exc:
+            semantic_error = exc
+
+        # Conservative fallback for environments where no text LLM is active or
+        # semantic mapping temporarily fails.
+        row = self._deterministic_form_fields_from_text(text)
         meaningful = {
             key: value
             for key, value in row.items()
             if key != "_source_raw" and value not in (None, "")
         }
-        if not meaningful:
+        if meaningful:
+            if semantic_error:
+                row["_source_raw"]["semantic_mapper_error"] = str(semantic_error)
+            return row
+
+        if semantic_error:
             raise ValueError(
-                "OCR completed, but SmartEndorse could not find recognizable member/passport fields. "
-                "The scan may be rotated or the OCR output may not contain field labels."
-            )
-        return row
+                "OCR text was read, but the semantic LLM could not map it to the member form. "
+                f"Mapper error: {semantic_error}"
+            ) from semantic_error
+        raise ValueError(
+            "OCR text was read, but no active semantic text LLM could map the document to member fields."
+        )
 
     def extract_form_fields_from_image_bytes(self, content, mime="image/png"):
         self._require_provider(vision=True)
@@ -751,18 +861,15 @@ class AIService:
         url = base + "/api/chat"
         options = self._ollama_runtime_options(vision=True)
         options["num_ctx"] = min(int(options.get("num_ctx") or 4096), 4096)
-        options["num_predict"] = min(int(options.get("num_predict") or 256), 256)
+        options["num_predict"] = min(int(options.get("num_predict") or 512), 512)
         options["temperature"] = 0.0
 
         prompt = (
-            "Text Recognition: Read the visible identity/member information in this document. "
-            "The document may be an insurance member form, ID card, or passport and may be rotated. "
-            "Return short plain-text labelled lines only for fields that are visible. "
-            "For insurance/member documents use: Member No, Employee No, Civil ID, Full Name, "
-            "Relationship, Date of Birth, Gender, Plan, Effective Date. "
-            "For passports also include: Surname, Given Names, Passport No, Nationality, Date of Birth, Sex. "
-            "If an MRZ is visible, include exactly two lines labelled MRZ1 and MRZ2. "
-            "Do not explain, do not summarize, do not repeat text, and do not return JSON."
+            "Text Recognition: Transcribe the document faithfully. "
+            "Preserve the original wording, field labels, values, table/row relationships, names, identifiers, dates, "
+            "numbers and machine-readable lines that are visible. The document type and nomenclature are unknown and "
+            "may differ from any predefined form. Do not rename fields to our terminology, do not infer missing values, "
+            "do not summarize, and do not return JSON. Output concise OCR text only."
         )
         payload = {
             "model": cfg.model_name,

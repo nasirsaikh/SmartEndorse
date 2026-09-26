@@ -332,9 +332,9 @@ class FileIntakeService:
             row = ai.extract_form_fields_from_image_bytes(Path(attachment.file.path).read_bytes(), mime)
             normalized = cls._normalize_ai_row(row)
             return [row.get("_source_raw", row)], [normalized], {
-                "method": "item_form_direct_ocr",
+                "method": "item_form_semantic_ocr",
                 "ai_profile": ai.last_profile_name,
-                "json_mapping": False,
+                "semantic_mapping": True,
             }
 
         if ext != ".pdf":
@@ -346,10 +346,10 @@ class FileIntakeService:
             row = ai.extract_form_fields_from_text(text)
             normalized = cls._normalize_ai_row(row)
             return [row.get("_source_raw", row)], [normalized], {
-                "method": "item_form_pdf_text",
+                "method": "item_form_pdf_text_semantic",
                 "page_count": len(reader.pages),
                 "ai_profile": ai.last_profile_name,
-                "json_mapping": False,
+                "semantic_mapping": True,
             }
 
         ai._require_provider(vision=True)
@@ -399,11 +399,11 @@ class FileIntakeService:
             raise ValueError("OCR completed, but no recognizable member fields were found.")
 
         return source_pages, [normalized], {
-            "method": "item_form_pdf_vision",
+            "method": "item_form_pdf_vision_semantic",
             "page_count": len(doc),
             "pages_processed": pages_processed,
             "ai_profile": ai.last_profile_name,
-            "json_mapping": False,
+            "semantic_mapping": True,
         }
 
     @classmethod
