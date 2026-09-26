@@ -811,7 +811,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
         self.assertNotIn("format", payload)
         self.assertEqual(payload["options"]["num_ctx"], 4096)
-        self.assertEqual(payload["options"]["num_predict"], 256)
+        self.assertEqual(payload["options"]["num_predict"], 512)
         self.assertEqual(payload["options"]["temperature"], 0.0)
         self.assertIn("nomenclature are unknown", payload["messages"][0]["content"])
         self.assertIn("do not return JSON", payload["messages"][0]["content"])
