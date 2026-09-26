@@ -417,6 +417,26 @@
     </div>
 
     <aside class="space-y-4">
+      {% if can_insurer_operate %}
+      <section class="se-panel">
+        <div class="se-panel-head"><div><div class="se-eyebrow">Insurer controls</div><div class="se-panel-title mt-1">AUTO-APPROVAL RULES</div></div><i class="bi bi-sliders text-primary"></i></div>
+        <form method="post" action="{% url 'endorsement_approval_rules' endorsement.pk %}" class="space-y-3 p-4">
+          {% csrf_token %}
+          <label class="flex cursor-pointer items-start gap-3">
+            {{ auto_rule_form.auto_stp }}
+            <span><strong class="block text-xs">Enable auto approval</strong><span class="mt-1 block text-[10px] opacity-55">Only requests passing every configured rule and risk check will auto-approve.</span></span>
+          </label>
+          <div class="se-field"><label>Minimum validation score %</label>{{ auto_rule_form.min_validation_score }}</div>
+          <div class="se-field"><label>Maximum absolute premium impact</label>{{ auto_rule_form.max_abs_premium_impact }}</div>
+          <label class="flex cursor-pointer items-start gap-3">
+            {{ auto_rule_form.block_on_risk_flags }}
+            <span><strong class="block text-xs">Block on risk / fraud flags</strong><span class="mt-1 block text-[10px] opacity-55">Any recognized risk, fraud, watchlist or manual-review flag creates insurer review.</span></span>
+          </label>
+          <button class="btn btn-primary btn-sm w-full" type="submit"><i class="bi bi-check2-circle"></i>SAVE POLICY RULES</button>
+        </form>
+      </section>
+      {% endif %}
+
       <section class="se-panel">
         <div class="se-panel-head"><div><div class="se-eyebrow">Approval SLA</div><div class="se-panel-title mt-1">SERVICE CLOCK</div></div><i class="bi bi-stopwatch text-primary"></i></div>
         {% for step in wizard_steps %}{% if step.key == "approval" %}
