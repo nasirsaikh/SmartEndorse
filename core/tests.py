@@ -10,7 +10,7 @@ from unittest.mock import patch
 from .access import accessible_policies, can_decide_approval
 from .ai import AIService
 from .models import (
-    AIExtractionProfile, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
+    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
     PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
 from .forms import EndorsementItemCorrectionForm
@@ -520,6 +520,50 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         content = 'Here is the result: [{"full_name":"Aisha"}]'
         parsed = AIService._parse_json_array(content)
         self.assertEqual(parsed[0]["full_name"], "Aisha")
+
+    def test_text_and_vision_providers_can_be_active_together(self):
+        text_provider = AIProviderConfig.objects.create(
+            name="Text Ollama",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=False,
+        )
+        vision_provider = AIProviderConfig.objects.create(
+            name="Vision Ollama",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5vl:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+
+        ai = AIService()
+        self.assertEqual(ai.config, text_provider)
+        ai._require_provider(vision=True)
+        self.assertEqual(ai.config, vision_provider)
+
+    def test_vision_provider_is_selected_when_default_text_provider_cannot_see_images(self):
+        AIProviderConfig.objects.create(
+            name="Text Only",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5:7b",
+            is_active=True,
+            supports_vision=False,
+        )
+        vision_provider = AIProviderConfig.objects.create(
+            name="Image OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5vl:7b",
+            is_active=True,
+            supports_vision=True,
+        )
+
+        ai = AIService()
+        self.assertFalse(ai.config.supports_vision)
+        ai._require_provider(vision=True)
+        self.assertEqual(ai.config, vision_provider)
 
     def test_seeded_admin_training_profiles_exist(self):
         self.assertTrue(
