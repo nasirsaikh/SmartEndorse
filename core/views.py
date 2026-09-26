@@ -11,6 +11,7 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from .access import (
@@ -25,7 +26,7 @@ from .models import (
     Attachment, BOOTSWATCH_THEMES, EndorsementApproval, EndorsementItem,
     EndorsementRequest, Policy, PolicyPlan, PortalNotification, RecoveryUpload, UserProfile, WorkflowEvent,
 )
-from .services import BulkRecoveryService, FileIntakeService, PricingEngine, ValidationService, WorkflowService, json_safe
+from .services import BulkRecoveryService, FileIntakeService, NotificationService, PricingEngine, ValidationService, WorkflowService, json_safe
 
 
 logger = logging.getLogger(__name__)
@@ -581,7 +582,25 @@ def _helpdesk_messages(endorsement, user):
         EndorsementRequest.Status.REJECTED,
         EndorsementRequest.Status.COMPLETED,
     }
-    for event in endorsement.events.filter(event_type="STATUS_CHANGE").select_related("actor"):
+    for event in endorsement.events.filter(event_type__in=["STATUS_CHANGE", "PROCESSING_MESSAGE"]).select_related("actor"):
+        if event.event_type == "PROCESSING_MESSAGE":
+            actor = event.actor
+            try:
+                actor_org = actor.profile.organization.name if actor else ""
+            except Exception:
+                actor_org = ""
+            messages_list.append({
+                "kind": "chat",
+                "created_at": event.created_at,
+                "sender": (actor.get_full_name() or actor.username) if actor else "System",
+                "organization": actor_org,
+                "subject": "",
+                "text": event.description,
+                "side": "end" if actor and actor.id == user.id else "start",
+                "query": None,
+                "can_reply": False,
+            })
+            continue
         if event.to_status not in processing_statuses and event.from_status not in processing_statuses:
             continue
         messages_list.append({
@@ -1097,6 +1116,39 @@ def supplemental_upload(request, pk):
         logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)
         messages.error(request, f"Supplemental upload failed for {endorsement.reference}: {exc}")
     return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
+def processing_message(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    message_text = request.POST.get("message", "").strip()
+    if not message_text:
+        messages.error(request, "Type a message before sending.")
+    else:
+        WorkflowEvent.objects.create(
+            request=endorsement,
+            actor=request.user,
+            event_type="PROCESSING_MESSAGE",
+            description=message_text,
+            payload={"source": "processing_helpdesk"},
+        )
+        recipients = [
+            user for user in NotificationService.recipients_for_request(endorsement)
+            if user.id != request.user.id
+        ]
+        NotificationService.create_portal(
+            recipients,
+            f"New message · {endorsement.reference}",
+            message_text[:300],
+            endorsement,
+            PortalNotification.Level.INFO,
+            {"event_type": "PROCESSING_MESSAGE"},
+        )
+        messages.success(request, "Message sent to the processing conversation.")
+    url = reverse("endorsement_detail", kwargs={"pk": pk})
+    return redirect(f"{url}?step=processing#processing-helpdesk")
 
 
 @login_required
