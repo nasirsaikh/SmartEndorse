@@ -600,6 +600,78 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(row["effective_date"], "15/09/2026")
         self.assertEqual(row["_source_raw"]["extraction_mode"], "direct_form_fill")
 
+    @patch.object(AIService, "_chat")
+    def test_semantic_form_mapper_handles_unfamiliar_document_nomenclature(self, chat_mock):
+        text_provider = AIProviderConfig.objects.create(
+            name="Semantic Mapper",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=False,
+        )
+        chat_mock.return_value = (
+            '{"items":[{'
+            '"member_no":"M-9001",'
+            '"employee_no":"EMP-77",'
+            '"national_id":"99887766",'
+            '"full_name":"Aisha Rahman",'
+            '"relationship":"Employee",'
+            '"date_of_birth":"1991-04-05",'
+            '"gender":"Female",'
+            '"plan_code":"G",'
+            '"annual_salary":null,'
+            '"sum_assured":null,'
+            '"effective_date":"2026-09-01"'
+            '}]}'
+        )
+        ai = AIService(
+            config=text_provider,
+            product=Policy.Product.GROUP_MEDICAL,
+            context={"valid_plans": [{"code": "G", "name": "Gold"}]},
+        )
+        source = (
+            "Covered Individual: Aisha Rahman\n"
+            "Govt Ref: 99887766\n"
+            "Workforce Key: EMP-77\n"
+            "Scheme Participant: M-9001\n"
+            "Benefit Tier: Gold\n"
+            "Commencement: 01 Sep 2026\n"
+            "Birth record: 05 Apr 1991\n"
+            "F\n"
+        )
+
+        row = ai.extract_form_fields_from_text(source)
+
+        self.assertEqual(row["full_name"], "Aisha Rahman")
+        self.assertEqual(row["national_id"], "99887766")
+        self.assertEqual(row["employee_no"], "EMP-77")
+        self.assertEqual(row["member_no"], "M-9001")
+        self.assertEqual(row["plan_code"], "G")
+        self.assertEqual(row["_source_raw"]["extraction_mode"], "semantic_llm")
+        prompt = chat_mock.call_args.args[0]
+        self.assertIn("nomenclature", prompt)
+        self.assertIn("Do not require exact labels", prompt)
+
+    @patch.object(AIService, "_chat", side_effect=RuntimeError("mapper unavailable"))
+    def test_semantic_mapper_failure_falls_back_to_conservative_parser(self, _chat_mock):
+        text_provider = AIProviderConfig.objects.create(
+            name="Semantic Mapper Fallback",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=False,
+        )
+        ai = AIService(config=text_provider)
+        row = ai.extract_form_fields_from_text(
+            "Civil ID: 12345678\nMember Name: Sara Al Hinai\nDOB: 22/09/2018"
+        )
+        self.assertEqual(row["national_id"], "12345678")
+        self.assertEqual(row["full_name"], "Sara Al Hinai")
+        self.assertEqual(row["_source_raw"]["extraction_mode"], "deterministic_fallback")
+        self.assertIn("mapper unavailable", row["_source_raw"]["semantic_mapper_error"])
+
     def test_passport_labels_fill_name_dob_gender_without_guessing_plan_or_relationship(self):
         ai = AIService(product=Policy.Product.GROUP_MEDICAL)
         text = (
@@ -741,6 +813,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertEqual(payload["options"]["num_ctx"], 4096)
         self.assertEqual(payload["options"]["num_predict"], 256)
         self.assertEqual(payload["options"]["temperature"], 0.0)
+        self.assertIn("nomenclature are unknown", payload["messages"][0]["content"])
         self.assertIn("do not return JSON", payload["messages"][0]["content"])
         self.assertTrue(payload["messages"][0]["images"])
 
