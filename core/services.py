@@ -1457,6 +1457,21 @@ class WorkflowService:
         return request_obj
 
     @classmethod
+    def reject_by_tpa(cls, request_obj, actor, reason):
+        if request_obj.policy.product != Policy.Product.GROUP_MEDICAL:
+            raise ValueError("TPA rejection applies only to Group Medical endorsements.")
+        if not str(reason or "").strip():
+            raise ValueError("TPA rejection reason is mandatory.")
+        cls.transition(
+            request_obj,
+            EndorsementRequest.Status.REJECTED,
+            actor,
+            f"TPA rejected the endorsement. Correction required: {str(reason).strip()}",
+            {"reason": str(reason).strip(), "source": "TPA"},
+        )
+        return request_obj
+
+    @classmethod
     def complete(cls, request_obj, actor, external_reference=""):
         gate = ValidationService.policy_gate_errors(request_obj)
         if gate:
