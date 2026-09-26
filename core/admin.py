@@ -64,7 +64,9 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
             "description": (
                 "For Ollama, options may override runtime parameters. Example for fast local OCR: "
                 '{"num_ctx": 4096, "num_gpu": -1, "num_predict": 1024, "keep_alive": "15m"}. '
-                "Vision OCR defaults to these values when they are not supplied. num_gpu=-1 means offload as many layers as fit."
+                "Vision OCR defaults to these values when they are not supplied. num_gpu=-1 means offload as many layers as fit. "
+                "GLM-OCR automatically runs as OCR-only and then uses a separate active text provider for strict JSON mapping. "
+                "Use vision_pipeline=direct_json only if you explicitly want the vision model itself to produce JSON."
             ),
         }),
     )

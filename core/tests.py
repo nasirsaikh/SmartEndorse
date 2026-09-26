@@ -593,7 +593,8 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         payload = client.post.call_args.kwargs["json"]
         self.assertEqual(url, "http://127.0.0.1:11434/api/generate")
         self.assertEqual(payload["model"], "bakllava:latest")
-        self.assertEqual(payload["format"], "json")
+        self.assertIsInstance(payload["format"], dict)
+        self.assertIn("items", payload["format"]["properties"])
         self.assertFalse(payload["stream"])
         self.assertTrue(payload["images"])
         self.assertIn('"items"', payload["prompt"])
@@ -608,6 +609,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
             timeout_seconds=300,
             is_active=True,
             supports_vision=True,
+            options={"vision_pipeline": "direct_json"},
         )
         response = MagicMock()
         response.is_success = True
@@ -634,7 +636,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
             timeout_seconds=300,
             is_active=True,
             supports_vision=True,
-            options={"num_ctx": 2048, "num_predict": 512, "keep_alive": "30m"},
+            options={"num_ctx": 2048, "num_predict": 512, "keep_alive": "30m", "vision_pipeline": "direct_json"},
         )
         response = MagicMock()
         response.is_success = True
@@ -679,6 +681,69 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         with self.assertRaisesRegex(RuntimeError, "bakllava:latest") as error:
             ai.extract_image_bytes(b"fake-image", "image/jpeg")
         self.assertIn("Installed models: llava:latest, qwen2.5:7b", str(error.exception))
+
+    @patch("core.ai.httpx.Client")
+    def test_glm_ocr_uses_ocr_text_then_text_model_json_mapping(self, client_cls):
+        text_provider = AIProviderConfig.objects.create(
+            name="Fast JSON Mapper",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=False,
+            timeout_seconds=120,
+        )
+        vision_provider = AIProviderConfig.objects.create(
+            name="GLM OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+            timeout_seconds=300,
+        )
+
+        ocr_response = MagicMock()
+        ocr_response.is_success = True
+        ocr_response.status_code = 200
+        ocr_response.json.return_value = {
+            "response": "Employee No: E100\nMember Name: Aisha\nRelationship: Employee"
+        }
+
+        mapper_response = MagicMock()
+        mapper_response.raise_for_status.return_value = mapper_response
+        mapper_response.json.return_value = {
+            "message": {
+                "content": '{"items":[{"member_no":null,"employee_no":"E100","national_id":null,"full_name":"Aisha","relationship":"Employee","date_of_birth":null,"gender":null,"plan_code":null,"annual_salary":null,"sum_assured":null,"effective_date":null}]}'
+            }
+        }
+
+        client = client_cls.return_value.__enter__.return_value
+        client.post.side_effect = [ocr_response, mapper_response]
+
+        ai = AIService(config=vision_provider, product=Policy.Product.GROUP_MEDICAL)
+        rows = ai.extract_image_bytes(b"fake-image", "image/jpeg")
+
+        self.assertEqual(rows[0]["employee_no"], "E100")
+        self.assertEqual(rows[0]["full_name"], "Aisha")
+        self.assertEqual(client.post.call_count, 2)
+
+        ocr_payload = client.post.call_args_list[0].kwargs["json"]
+        self.assertNotIn("format", ocr_payload)
+        self.assertIn("Text Recognition:", ocr_payload["prompt"])
+
+        mapper_payload = client.post.call_args_list[1].kwargs["json"]
+        self.assertEqual(mapper_payload["model"], text_provider.model_name)
+        self.assertIsInstance(mapper_payload["format"], dict)
+        self.assertIn("items", mapper_payload["format"]["properties"])
+
+    def test_json_parser_recovers_first_valid_value_from_concatenated_json(self):
+        content = (
+            '{"items":[{"full_name":"Aisha"}]}'
+            '{"items":[{"full_name":"Duplicate"}]}'
+        )
+        rows = AIService._parse_json_array(content)
+        self.assertEqual(rows[0]["full_name"], "Aisha")
 
     def test_seeded_admin_training_profiles_exist(self):
         self.assertTrue(
