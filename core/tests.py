@@ -599,6 +599,59 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertIn('"items"', payload["prompt"])
 
     @patch("core.ai.httpx.Client")
+    def test_ollama_vision_defaults_to_small_context_and_max_gpu_offload(self, client_cls):
+        provider = AIProviderConfig.objects.create(
+            name="GLM OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            timeout_seconds=300,
+            is_active=True,
+            supports_vision=True,
+        )
+        response = MagicMock()
+        response.is_success = True
+        response.status_code = 200
+        response.json.return_value = {"response": '{"items":[]}'}
+        client = client_cls.return_value.__enter__.return_value
+        client.post.return_value = response
+
+        AIService(config=provider).extract_image_bytes(b"fake-image", "image/jpeg")
+
+        payload = client.post.call_args.kwargs["json"]
+        self.assertEqual(payload["options"]["num_ctx"], 4096)
+        self.assertEqual(payload["options"]["num_gpu"], -1)
+        self.assertEqual(payload["options"]["num_predict"], 1024)
+        self.assertEqual(payload["keep_alive"], "15m")
+
+    @patch("core.ai.httpx.Client")
+    def test_ollama_vision_runtime_options_can_be_overridden_from_admin(self, client_cls):
+        provider = AIProviderConfig.objects.create(
+            name="GLM OCR Tuned",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="glm-ocr:q8_0",
+            base_url="http://127.0.0.1:11434",
+            timeout_seconds=300,
+            is_active=True,
+            supports_vision=True,
+            options={"num_ctx": 2048, "num_predict": 512, "keep_alive": "30m"},
+        )
+        response = MagicMock()
+        response.is_success = True
+        response.status_code = 200
+        response.json.return_value = {"response": '{"items":[]}'}
+        client = client_cls.return_value.__enter__.return_value
+        client.post.return_value = response
+
+        AIService(config=provider).extract_image_bytes(b"fake-image", "image/jpeg")
+
+        payload = client.post.call_args.kwargs["json"]
+        self.assertEqual(payload["options"]["num_ctx"], 2048)
+        self.assertEqual(payload["options"]["num_predict"], 512)
+        self.assertEqual(payload["options"]["num_gpu"], -1)
+        self.assertEqual(payload["keep_alive"], "30m")
+
+    @patch("core.ai.httpx.Client")
     def test_ollama_404_explains_model_and_installed_models(self, client_cls):
         provider = AIProviderConfig.objects.create(
             name="BakLLaVA OCR",
