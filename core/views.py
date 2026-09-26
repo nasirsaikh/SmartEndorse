@@ -417,17 +417,25 @@ def _workflow_steps(endorsement):
 
     steps = []
     total_target = 0
+    stage_order = [key for key, _, _, _ in stage_defs] + ["completion"]
+    current_index = stage_order.index(current_stage) if current_stage in stage_order else 0
     for key, label, profile, fallback in stage_defs:
         target_hours = profile.target_hours if profile else fallback
         total_target += target_hours
         actual_hours = round(durations[key], 1) if key in visited else None
+        if key == current_stage:
+            state = "active"
+        elif key in visited:
+            state = "returned" if stage_order.index(key) > current_index else "done"
+        else:
+            state = "pending"
         steps.append({
             "key": key,
             "label": label,
             "target_hours": target_hours,
             "actual_hours": actual_hours,
             "breached": actual_hours is not None and actual_hours > target_hours,
-            "state": "active" if key == current_stage else "done" if key in visited else "pending",
+            "state": state,
             "tat_label": "Step TAT",
         })
 
