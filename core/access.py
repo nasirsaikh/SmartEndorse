@@ -61,7 +61,10 @@ def accessible_policies(user, require_create=False):
 def accessible_endorsements(user):
     policies = accessible_policies(user)
     qs = EndorsementRequest.objects.filter(policy__in=policies).select_related(
-        "policy", "policy__client", "policy__tpa", "policy__insurer", "requester", "requester_organization"
+        "policy", "policy__client", "policy__tpa", "policy__insurer",
+        "policy__intake_sla", "policy__validation_sla", "policy__insurer_sla",
+        "policy__tpa_sla", "policy__client_query_sla",
+        "requester", "requester_organization"
     )
     if user.is_superuser:
         return qs
