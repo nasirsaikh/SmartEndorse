@@ -59,7 +59,7 @@
       <div class="se-eyebrow text-warning opacity-100">Blocking validation</div>
       <div class="se-panel-title mt-1">ACTION REQUIRED BEFORE PROCESSING</div>
     </div>
-    {% if can_edit and endorsement.status == "NEEDS_INFO" %}
+    {% if can_edit and endorsement.status == "NEEDS_INFO" or can_edit and endorsement.status == "TPA_QUERY" %}
     <form method="post" action="{% url 'endorsement_revalidate' endorsement.pk %}">
       {% csrf_token %}
       <button class="btn btn-warning btn-sm" type="submit"><i class="bi bi-arrow-repeat"></i>REVALIDATE NOW</button>
