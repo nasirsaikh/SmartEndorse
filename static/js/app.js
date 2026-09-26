@@ -93,7 +93,15 @@
   });
   document.addEventListener('htmx:beforeRequest', e => startSpinner(loadingButton(e.detail.elt)));
   document.addEventListener('htmx:afterRequest', e => stopSpinner(loadingButton(e.detail.elt)));
-  document.addEventListener('htmx:responseError', e => stopSpinner(loadingButton(e.detail.elt)));
+  document.addEventListener('htmx:responseError', e => {
+    stopSpinner(loadingButton(e.detail.elt));
+    const status = e.detail.xhr?.status;
+    const suffix = status ? ` (HTTP ${status})` : '';
+    showClientToast(
+      'Request could not be completed',
+      `SmartEndorse encountered an error${suffix}. The action was not completed. Review the message on the page or retry the request.`
+    );
+  });
   document.addEventListener('htmx:afterSwap', e => {
     initSelects(e.detail.target || document);
     initToasts(e.detail.target || document);
