@@ -505,6 +505,7 @@ class EndorsementQuery(TimeStampedModel):
 class EndorsementApproval(TimeStampedModel):
     class ApprovalType(models.TextChoices):
         EXISTING_MEMBER = "EXISTING_MEMBER", "Existing member exception"
+        INSURER_REVIEW = "INSURER_REVIEW", "Insurer manual review"
         TPA_AMOUNT_CHANGE = "TPA_AMOUNT_CHANGE", "TPA amount change"
 
     class Status(models.TextChoices):
