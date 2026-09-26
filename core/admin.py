@@ -59,7 +59,14 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
                 "when available, and automatically selects an active Supports vision provider for image/scanned-PDF OCR."
             ),
         }),
-        ("Runtime", {"fields": ("temperature", "timeout_seconds", "options")}),
+        ("Runtime", {
+            "fields": ("temperature", "timeout_seconds", "options"),
+            "description": (
+                "For Ollama, options may override runtime parameters. Example for fast local OCR: "
+                '{"num_ctx": 4096, "num_gpu": -1, "num_predict": 1024, "keep_alive": "15m"}. '
+                "Vision OCR defaults to these values when they are not supplied. num_gpu=-1 means offload as many layers as fit."
+            ),
+        }),
     )
 
 

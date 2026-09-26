@@ -169,6 +169,25 @@ class AIService:
         headers.update((self.config.options or {}).get("headers", {}))
         return headers
 
+    def _ollama_runtime_options(self, *, vision=False):
+        configured = dict(self.config.options or {})
+        configured.pop("headers", None)
+        configured.pop("keep_alive", None)
+        defaults = {
+            "temperature": float(self.config.temperature),
+        }
+        if vision:
+            defaults.update({
+                "num_ctx": 4096,
+                "num_gpu": -1,
+                "num_predict": 1024,
+            })
+        defaults.update(configured)
+        return defaults
+
+    def _ollama_keep_alive(self):
+        return (self.config.options or {}).get("keep_alive", "15m")
+
     def _base_url(self):
         if self.config.base_url:
             return self.config.base_url.rstrip("/")
@@ -193,7 +212,8 @@ class AIService:
                 "model": cfg.model_name,
                 "stream": False,
                 "messages": messages,
-                "options": {"temperature": float(cfg.temperature)},
+                "options": self._ollama_runtime_options(vision=False),
+                "keep_alive": self._ollama_keep_alive(),
             }
         elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
             url = base + "/v1/messages"
@@ -273,7 +293,8 @@ class AIService:
                 "prompt": prompt,
                 "images": [encoded],
                 "format": "json",
-                "options": {"temperature": float(cfg.temperature)},
+                "options": self._ollama_runtime_options(vision=True),
+                "keep_alive": self._ollama_keep_alive(),
             }
             if system_prompt:
                 payload["system"] = system_prompt
