@@ -27,7 +27,7 @@
       {% if ocr_source %}
       <div class="border-b border-success/30 bg-success/5 px-4 py-3 text-xs">
         <i class="bi bi-stars mr-1 text-success"></i>
-        Values extracted from <strong>{{ ocr_source }}</strong> are shown below for review. Nothing is saved until you click <strong>Save & revalidate</strong>.
+        Values extracted from <strong>{{ ocr_source }}</strong> are shown below for review. Nothing is saved until you click <strong>SAVE CORRECTION</strong>.
       </div>
       {% endif %}
 
@@ -52,7 +52,7 @@
     <div class="flex flex-wrap justify-end gap-2">
       <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost">CANCEL</a>
       <button class="btn btn-primary" type="submit">
-        <span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE & REVALIDATE</span>
+        <span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE CORRECTION</span>
         <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
       </button>
     </div>
