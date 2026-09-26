@@ -108,9 +108,12 @@ def dashboard(request):
     average_tat_hours = round(sum(completed_hours) / len(completed_hours), 1) if completed_hours else 0
     within_sla = 0
     for item in completed_qs:
-        profiles = [item.policy.intake_sla, item.policy.validation_sla, item.policy.insurer_sla]
-        if item.policy.product == Policy.Product.GROUP_MEDICAL:
-            profiles.append(item.policy.tpa_sla)
+        profiles = [
+            item.policy.intake_sla or item.policy.client_query_sla,
+            item.policy.validation_sla or item.policy.insurer_sla,
+            item.policy.insurer_sla,
+            item.policy.tpa_sla if item.policy.product == Policy.Product.GROUP_MEDICAL else item.policy.insurer_sla,
+        ]
         target = sum(profile.target_hours for profile in profiles if profile)
         if target and item.completed_at and (item.completed_at - item.created_at).total_seconds() <= target * 3600:
             within_sla += 1
@@ -1092,7 +1095,11 @@ def answer_query(request, pk, query_id):
         return HttpResponse(status=405)
     endorsement = _get_accessible_request(request.user, pk)
     query = get_object_or_404(endorsement.queries, pk=query_id, is_closed=False)
-    if request.user.profile.organization_id != query.assigned_organization_id and not request.user.is_superuser:
+    if (
+        request.user.profile.organization_id != query.assigned_organization_id
+        and not can_insurer_operate(request.user, endorsement)
+        and not request.user.is_superuser
+    ):
         raise PermissionDenied
     form = QueryResponseForm(request.POST)
     if form.is_valid():
