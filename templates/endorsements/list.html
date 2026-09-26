@@ -1,17 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Endorsements | SmartEndorse{% endblock %}
-{% block page_title %}Endorsement Pipeline{% endblock %}
+{% block page_title %}Endorsements{% endblock %}
+{% block object_tools %}
+<ul class="portal-object-tools">
+  {% if can_create %}<li><a class="addlink" href="{% url 'endorsement_create' %}">Add endorsement</a></li>{% endif %}
+</ul>
+{% endblock %}
 {% block content %}
-<div class="panel">
-  <div class="panel-heading flex-wrap gap-3">
-    <form class="row g-2 flex-grow-1" hx-get="{% url 'endorsement_list' %}" hx-target="#request-table" hx-push-url="true" hx-trigger="change, keyup changed delay:350ms from:#search-q">
-      <div class="col-lg-5"><div class="form-floating"><input id="search-q" name="q" value="{{ q }}" class="form-control" placeholder="Search"><label for="search-q"><i class="bi bi-search me-1"></i>Reference, policy, client or member</label></div></div>
-      <div class="col-lg-3"><div class="form-floating"><select id="filter-status" name="status" class="form-select searchable-select"><option value="">All statuses</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><label for="filter-status">Status</label></div></div>
-      <div class="col-lg-3"><div class="form-floating"><select id="filter-product" name="product" class="form-select searchable-select"><option value="">All products</option>{% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><label for="filter-product">Product</label></div></div>
-      <div class="col-lg-1 d-flex align-items-center justify-content-center"><div class="htmx-indicator spinner-border spinner-border-sm" aria-label="Loading"></div></div>
-    </form>
-    {% if can_create %}<a class="btn btn-primary" href="{% url 'endorsement_create' %}"><i class="bi bi-plus-circle me-1"></i>New endorsement</a>{% endif %}
-  </div>
+<section class="module" id="changelist">
+  <h2>Endorsement pipeline</h2>
+  <form class="portal-filterbar"
+        hx-get="{% url 'endorsement_list' %}"
+        hx-target="#request-table"
+        hx-push-url="true"
+        hx-trigger="change, keyup changed delay:350ms from:#search-q">
+    <div>
+      <label for="search-q">Search</label>
+      <input id="search-q" name="q" value="{{ q }}" placeholder="Reference, policy, client or member">
+    </div>
+    <div>
+      <label for="filter-status">Status</label>
+      <select id="filter-status" name="status" class="searchable-select">
+        <option value="">All statuses</option>
+        {% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="filter-product">Product</label>
+      <select id="filter-product" name="product" class="searchable-select">
+        <option value="">All products</option>
+        {% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="htmx-indicator">Loading…</div>
+  </form>
   <div id="request-table">{% include "endorsements/_table.html" %}</div>
-</div>
+</section>
 {% endblock %}
