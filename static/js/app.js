@@ -142,36 +142,6 @@
     });
   }
 
-  function initSelects(root = document) {
-    const selects = [];
-    if (root.matches?.("select.searchable-select")) selects.push(root);
-    root.querySelectorAll?.("select.searchable-select").forEach(select => selects.push(select));
-
-    selects.forEach(select => {
-      if (select.tomselect) {
-        if (root === select) {
-          try { select.tomselect.destroy(); } catch (_) {}
-        } else {
-          return;
-        }
-      }
-      new TomSelect(select, {
-        create: false,
-        allowEmptyOption: true,
-        maxOptions: 500,
-        plugins: ["dropdown_input"],
-        placeholder: select.dataset.placeholder || "Search…",
-        closeAfterSelect: true,
-        onChange() {
-          if (select.dataset.planSumAssured === "true") updatePlanSumAssured(select);
-        },
-        onDropdownOpen() {
-          this.positionDropdown();
-        }
-      });
-    });
-  }
-
   function loadingButton(elt) {
     if (!elt) return null;
     if (elt.matches?.('button, input[type="submit"]')) return elt;
@@ -311,7 +281,6 @@
 
   function initialize(root = document) {
     initDropzones(root);
-    initSelects(root);
     initPlanSumAssured(root);
     notifyNewPortalItems(root);
     updateThemeIcon();
