@@ -54,16 +54,21 @@ class SLAService:
     def for_status(cls, request, status):
         if status in {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS}:
             return cls.deadline(request.policy.tpa_sla)
-        if status in {EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.NEEDS_INFO}:
+        if status in {EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED}:
             return cls.deadline(request.policy.client_query_sla)
         if status in {
             EndorsementRequest.Status.SUBMITTED,
             EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
             EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+            EndorsementRequest.Status.READY_FOR_CORE,
+            EndorsementRequest.Status.CORE_DISPATCHED,
         }:
             return cls.deadline(request.policy.insurer_sla)
+        if status == EndorsementRequest.Status.DRAFT:
+            return cls.deadline(request.policy.intake_sla)
+        if status == EndorsementRequest.Status.VALIDATING:
+            return cls.deadline(request.policy.validation_sla)
         return None
-
 
 class NotificationService:
     STATUS_LEVELS = {
@@ -1292,6 +1297,8 @@ class DispatchService:
 
 
 class WorkflowService:
+    RISK_KEYS = ("fraud_flag", "watchlist_match", "risk_flag", "manual_review", "suspected_fraud")
+
     @staticmethod
     def transition(request_obj, status, actor=None, description="", payload=None, notify=True):
         old = request_obj.status
@@ -1308,6 +1315,42 @@ class WorkflowService:
         if notify:
             NotificationService.status_changed(request_obj, description)
 
+    @staticmethod
+    def _risk_review_reasons(request_obj, config):
+        rules = request_obj.policy.auto_approval_rules or {}
+        reasons = []
+        if not config.auto_stp_enabled:
+            reasons.append("Platform straight-through auto approval is disabled.")
+        if not request_obj.policy.auto_stp:
+            reasons.append("Policy is configured for insurer review instead of automatic approval.")
+
+        min_score = rules.get("min_validation_score")
+        if min_score not in (None, ""):
+            try:
+                if Decimal(str(request_obj.validation_score)) < Decimal(str(min_score)):
+                    reasons.append(f"Validation score {request_obj.validation_score}% is below the auto-approval threshold of {min_score}%.")
+            except Exception:
+                pass
+
+        max_impact = rules.get("max_abs_premium_impact")
+        if max_impact not in (None, ""):
+            try:
+                if abs(Decimal(str(request_obj.premium_impact))) > Decimal(str(max_impact)):
+                    reasons.append(
+                        f"Absolute premium impact {request_obj.currency} {abs(request_obj.premium_impact):.3f} exceeds the auto-approval limit of {max_impact}."
+                    )
+            except Exception:
+                pass
+
+        if rules.get("block_on_risk_flags", True):
+            for item in request_obj.items.all():
+                data = item.extracted_data if isinstance(item.extracted_data, dict) else {}
+                matched = [key for key in WorkflowService.RISK_KEYS if data.get(key)]
+                if matched:
+                    label = item.full_name or item.member_no or item.employee_no or f"Item {item.pk}"
+                    reasons.append(f"{label} contains risk flag(s): {', '.join(matched)}.")
+        return reasons
+
     @classmethod
     @transaction.atomic
     def submit(cls, request_obj, actor=None):
@@ -1318,46 +1361,114 @@ class WorkflowService:
         request_obj.submitted_at = timezone.now()
         request_obj.save(update_fields=["validation_errors", "validation_score", "submitted_at", "updated_at"])
         if errors or not request_obj.items.exists():
-            cls.transition(request_obj, EndorsementRequest.Status.NEEDS_INFO, actor, "Validation found missing/invalid data. Processing is blocked until all errors are resolved.", {"errors": errors})
+            cls.transition(
+                request_obj,
+                EndorsementRequest.Status.NEEDS_INFO,
+                actor,
+                "Validation found missing/invalid data. Return to Intake, correct the records, then validate again.",
+                {"errors": errors},
+            )
             return request_obj
 
         PricingEngine.calculate_request(request_obj)
+        request_obj.refresh_from_db()
         cfg = platform_config()
-        approval_items = request_obj.items.filter(requires_insurer_approval=True)
-        if approval_items.exists():
+        approval_items = list(request_obj.items.filter(requires_insurer_approval=True))
+        review_reasons = cls._risk_review_reasons(request_obj, cfg)
+
+        for item in approval_items:
+            approval, created = EndorsementApproval.objects.get_or_create(
+                request=request_obj,
+                item=item,
+                approval_type=EndorsementApproval.ApprovalType.EXISTING_MEMBER,
+                status=EndorsementApproval.Status.PENDING,
+                defaults={
+                    "assigned_organization": request_obj.policy.insurer,
+                    "requested_by": actor,
+                    "reason": f"Existing active member match detected for {item.full_name or item.member_no}. Insurer approval is required before processing.",
+                },
+            )
+            if created:
+                item.validation_status = EndorsementItem.ValidationStatus.APPROVAL_REQUIRED
+                item.save(update_fields=["validation_status", "updated_at"])
+                NotificationService.approval_requested(approval)
+
+        if review_reasons:
+            approval, created = EndorsementApproval.objects.get_or_create(
+                request=request_obj,
+                item=None,
+                approval_type=EndorsementApproval.ApprovalType.INSURER_REVIEW,
+                status=EndorsementApproval.Status.PENDING,
+                defaults={
+                    "assigned_organization": request_obj.policy.insurer,
+                    "requested_by": actor,
+                    "reason": " ".join(review_reasons),
+                },
+            )
+            if not created:
+                approval.reason = " ".join(review_reasons)
+                approval.assigned_organization = request_obj.policy.insurer
+                approval.requested_by = actor
+                approval.save(update_fields=["reason", "assigned_organization", "requested_by", "updated_at"])
+            else:
+                NotificationService.approval_requested(approval)
+
+        pending = request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING)
+        if pending.exists():
             request_obj.stp_eligible = False
-            request_obj.save(update_fields=["stp_eligible", "updated_at"])
-            for item in approval_items:
-                approval, created = EndorsementApproval.objects.get_or_create(
-                    request=request_obj, item=item, approval_type=EndorsementApproval.ApprovalType.EXISTING_MEMBER,
-                    status=EndorsementApproval.Status.PENDING,
-                    defaults={"assigned_organization": request_obj.policy.insurer, "requested_by": actor, "reason": f"Existing active member match detected for {item.full_name or item.member_no}. Insurer approval is required before processing."},
-                )
-                if created:
-                    item.validation_status = EndorsementItem.ValidationStatus.APPROVAL_REQUIRED
-                    item.save(update_fields=["validation_status", "updated_at"])
-                    NotificationService.approval_requested(approval)
-            cls.transition(request_obj, EndorsementRequest.Status.PENDING_INSURER_APPROVAL, actor, "Existing member record(s) require insurance company approval before processing.")
+            request_obj.metadata = {
+                **(request_obj.metadata or {}),
+                "insurer_review_reasons": review_reasons,
+                "auto_approval_result": "manual_review",
+            }
+            request_obj.save(update_fields=["stp_eligible", "metadata", "updated_at"])
+            cls.transition(
+                request_obj,
+                EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+                actor,
+                "Validation passed, but insurer review is required before downstream processing.",
+                {"review_reasons": review_reasons},
+            )
             return request_obj
 
-        request_obj.stp_eligible = bool(cfg.auto_stp_enabled and request_obj.policy.auto_stp)
-        request_obj.save(update_fields=["stp_eligible", "updated_at"])
-        cls.transition(request_obj, EndorsementRequest.Status.SUBMITTED, actor, "Request passed validation and pricing.")
-        if not request_obj.stp_eligible:
-            return request_obj
-        return cls._auto_dispatch(request_obj)
+        request_obj.stp_eligible = True
+        request_obj.metadata = {
+            **(request_obj.metadata or {}),
+            "insurer_review_reasons": [],
+            "auto_approval_result": "approved",
+        }
+        request_obj.save(update_fields=["stp_eligible", "metadata", "updated_at"])
+        cls.transition(request_obj, EndorsementRequest.Status.SUBMITTED, actor, "Validation and pricing passed. Auto-approval rules are being applied.")
+        return cls._release_after_insurer_approval(request_obj, actor=None, automatic=True)
 
     @classmethod
-    def _auto_dispatch(cls, request_obj):
-        cls.transition(request_obj, EndorsementRequest.Status.AUTO_APPROVED, None, "Straight-through rules passed. No insurer manual approval required.")
-        try:
-            endpoint = DispatchService.dispatch(request_obj)
-            target = EndorsementRequest.Status.SENT_TO_TPA if request_obj.policy.product == Policy.Product.GROUP_MEDICAL else EndorsementRequest.Status.CORE_DISPATCHED
-            cls.transition(request_obj, target, None, f"Automatically dispatched through {endpoint.get_transport_display()}.")
-        except Exception as exc:
-            request_obj.validation_errors = [*request_obj.validation_errors, f"Automatic dispatch failed: {exc}"]
-            request_obj.save(update_fields=["validation_errors", "updated_at"])
-            cls.transition(request_obj, EndorsementRequest.Status.FAILED, None, "Automatic dispatch failed.", {"error": str(exc)})
+    def _release_after_insurer_approval(cls, request_obj, actor=None, automatic=False):
+        description = (
+            "Straight-through auto-approval rules passed."
+            if automatic else
+            "Insurer approval completed."
+        )
+        cls.transition(request_obj, EndorsementRequest.Status.AUTO_APPROVED, actor, description)
+        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL:
+            try:
+                endpoint = DispatchService.dispatch(request_obj)
+                cls.transition(
+                    request_obj,
+                    EndorsementRequest.Status.SENT_TO_TPA,
+                    actor,
+                    f"Approved request dispatched to TPA through {endpoint.get_transport_display()}.",
+                )
+            except Exception as exc:
+                request_obj.validation_errors = [*request_obj.validation_errors, f"TPA dispatch failed: {exc}"]
+                request_obj.save(update_fields=["validation_errors", "updated_at"])
+                cls.transition(request_obj, EndorsementRequest.Status.FAILED, actor, "Approved request could not be dispatched to the TPA.", {"error": str(exc)})
+        else:
+            cls.transition(
+                request_obj,
+                EndorsementRequest.Status.READY_FOR_CORE,
+                actor,
+                "Approved and queued for insurer operations/core posting. Operations can post the endorsement and complete it when the core reference is available.",
+            )
         return request_obj
 
     @classmethod
@@ -1371,51 +1482,122 @@ class WorkflowService:
             raise ValueError(" ".join(gate))
         if request_obj.validation_errors:
             raise ValueError("Validation errors must be resolved before processing.")
-        cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA processing started.")
+        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL:
+            cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA processing started.")
+        else:
+            cls.transition(request_obj, EndorsementRequest.Status.CORE_DISPATCHED, actor, "Insurer operations/core posting started.")
 
     @classmethod
-    def update_tpa_item(cls, item, actor, card_number, amount):
+    def update_tpa_item(cls, item, actor, card_number=None, effective_date=None, amount=None, action="save", comment=""):
         request_obj = item.request
         if request_obj.policy.product != Policy.Product.GROUP_MEDICAL:
-            raise ValueError("TPA card/amount processing applies only to Group Medical endorsements.")
-        old_card, old_amount = item.card_number, item.tpa_premium_amount
-        amount = Decimal(str(amount)) if amount not in (None, "") else item.premium_impact
-        item.card_number = str(card_number or "").strip()
-        item.tpa_premium_amount = amount
-        item.save(update_fields=["card_number", "tpa_premium_amount", "updated_at"])
+            raise ValueError("TPA processing applies only to Group Medical endorsements.")
+
+        old = {
+            "card_number": item.card_number,
+            "effective_date": item.tpa_effective_date,
+            "amount": item.tpa_premium_amount,
+            "status": item.tpa_status,
+        }
+
+        if action in {"save", "approve"}:
+            amount = Decimal(str(amount)) if amount not in (None, "") else item.premium_impact
+            item.card_number = str(card_number or "").strip()
+            item.tpa_effective_date = effective_date
+            item.tpa_premium_amount = amount
+            item.tpa_status = EndorsementItem.TPAStatus.PENDING
+            item.tpa_decision_comment = ""
+            item.save(update_fields=[
+                "card_number", "tpa_effective_date", "tpa_premium_amount",
+                "tpa_status", "tpa_decision_comment", "updated_at",
+            ])
+
         WorkflowEvent.objects.create(
-            request=request_obj, actor=actor, event_type="TPA_ITEM_UPDATED",
-            description=f"TPA updated card/amount for item {item.pk}.",
-            payload=json_safe({"item_id": item.pk, "before": {"card_number": old_card, "amount": old_amount}, "after": {"card_number": item.card_number, "amount": amount}}),
+            request=request_obj,
+            actor=actor,
+            event_type="TPA_ITEM_UPDATED",
+            description=f"TPA {action} action for item {item.pk}.",
+            payload=json_safe({
+                "item_id": item.pk,
+                "action": action,
+                "comment": comment,
+                "before": old,
+                "after": {
+                    "card_number": item.card_number,
+                    "effective_date": item.tpa_effective_date,
+                    "amount": item.tpa_premium_amount,
+                    "status": item.tpa_status,
+                },
+            }),
         )
+
+        if action in {"reject", "query"}:
+            item.tpa_status = EndorsementItem.TPAStatus.REJECTED if action == "reject" else EndorsementItem.TPAStatus.QUERY
+            item.tpa_decision_comment = comment.strip()
+            item.tpa_decided_by = actor
+            item.tpa_decided_at = timezone.now()
+            item.save(update_fields=["tpa_status", "tpa_decision_comment", "tpa_decided_by", "tpa_decided_at", "updated_at"])
+            subject = f"TPA {'rejection' if action == 'reject' else 'query'} - {item.full_name or item.member_no or f'Item {item.pk}'}"
+            cls.raise_query(request_obj, actor, subject, comment.strip())
+            return None
+
+        if action == "save":
+            return None
+
+        amount = item.tpa_premium_amount if item.tpa_premium_amount is not None else item.premium_impact
         if amount != item.premium_impact:
             cfg = platform_config()
             assigned_org = request_obj.policy.insurer if cfg.tpa_amount_approval_party == PlatformConfiguration.AmountApprovalParty.INSURER else request_obj.policy.client
             approval = EndorsementApproval.objects.filter(
-                request=request_obj, item=item, approval_type=EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE,
+                request=request_obj,
+                item=item,
+                approval_type=EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE,
                 status=EndorsementApproval.Status.PENDING,
             ).first()
+            reason = (
+                f"TPA changed amount from {request_obj.currency} {item.premium_impact:.3f} "
+                f"to {request_obj.currency} {amount:.3f} for {item.full_name or item.member_no}."
+            )
             if approval:
                 approval.assigned_organization = assigned_org
                 approval.requested_by = actor
-                approval.reason = f"TPA changed amount from {request_obj.currency} {item.premium_impact:.3f} to {request_obj.currency} {amount:.3f} for {item.full_name or item.member_no}."
+                approval.reason = reason
                 approval.old_amount = item.premium_impact
                 approval.new_amount = amount
                 approval.save(update_fields=["assigned_organization", "requested_by", "reason", "old_amount", "new_amount", "updated_at"])
             else:
                 approval = EndorsementApproval.objects.create(
-                    request=request_obj, item=item, approval_type=EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE,
-                    assigned_organization=assigned_org, requested_by=actor,
-                    reason=f"TPA changed amount from {request_obj.currency} {item.premium_impact:.3f} to {request_obj.currency} {amount:.3f} for {item.full_name or item.member_no}.",
-                    old_amount=item.premium_impact, new_amount=amount,
+                    request=request_obj,
+                    item=item,
+                    approval_type=EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE,
+                    assigned_organization=assigned_org,
+                    requested_by=actor,
+                    reason=reason,
+                    old_amount=item.premium_impact,
+                    new_amount=amount,
                 )
-            cls.transition(request_obj, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL, actor, "TPA changed the calculated amount. Approval is required before completion.")
+            cls.transition(request_obj, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL, actor, "TPA changed the calculated amount. Approval is required before final completion.")
             NotificationService.approval_requested(approval)
             return approval
+
+        item.tpa_status = EndorsementItem.TPAStatus.APPROVED
+        item.tpa_decision_comment = comment.strip()
+        item.tpa_decided_by = actor
+        item.tpa_decided_at = timezone.now()
+        item.save(update_fields=["tpa_status", "tpa_decision_comment", "tpa_decided_by", "tpa_decided_at", "updated_at"])
+
+        if not request_obj.items.exclude(tpa_status=EndorsementItem.TPAStatus.APPROVED).exists():
+            cls.complete(request_obj, actor, request_obj.external_reference)
+        else:
+            cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA approved one member. Remaining members are still pending.")
         return None
 
     @classmethod
     def decide_approval(cls, approval, actor, approve=True, comment=""):
+        comment = (comment or "").strip()
+        if not approve and not comment:
+            raise ValueError("Rejection reason is required.")
+
         approval.status = EndorsementApproval.Status.APPROVED if approve else EndorsementApproval.Status.REJECTED
         approval.decided_by = actor
         approval.decided_at = timezone.now()
@@ -1423,36 +1605,57 @@ class WorkflowService:
         approval.save(update_fields=["status", "decided_by", "decided_at", "decision_comment", "updated_at"])
         request_obj = approval.request
         WorkflowEvent.objects.create(
-            request=request_obj, actor=actor, event_type="APPROVAL_DECISION",
+            request=request_obj,
+            actor=actor,
+            event_type="APPROVAL_DECISION",
             description=f"{approval.get_approval_type_display()} {approval.get_status_display().lower()}.",
             payload=json_safe({"approval_id": approval.pk, "type": approval.approval_type, "decision": approval.status, "comment": comment}),
         )
+
         if not approve:
             if approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE and approval.item_id:
                 approval.item.tpa_premium_amount = approval.old_amount
-                approval.item.save(update_fields=["tpa_premium_amount", "updated_at"])
-                cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "TPA amount change rejected; system-calculated amount restored.")
+                approval.item.tpa_status = EndorsementItem.TPAStatus.PENDING
+                approval.item.tpa_decision_comment = comment
+                approval.item.save(update_fields=["tpa_premium_amount", "tpa_status", "tpa_decision_comment", "updated_at"])
+                cls.transition(
+                    request_obj,
+                    EndorsementRequest.Status.TPA_IN_PROGRESS,
+                    actor,
+                    f"TPA amount change rejected. Reason: {comment}. The TPA may correct and resubmit.",
+                )
             else:
-                cls.transition(request_obj, EndorsementRequest.Status.REJECTED, actor, "Existing member exception was rejected by the insurer.")
+                cls.transition(
+                    request_obj,
+                    EndorsementRequest.Status.REJECTED,
+                    actor,
+                    f"Insurer rejected the endorsement. Reason: {comment}. The requester may correct the intake and resubmit.",
+                    {"rejection_reason": comment},
+                )
             return request_obj
 
         if request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING).exists():
             return request_obj
-        if approval.approval_type == EndorsementApproval.ApprovalType.EXISTING_MEMBER:
+
+        if approval.approval_type in {
+            EndorsementApproval.ApprovalType.EXISTING_MEMBER,
+            EndorsementApproval.ApprovalType.INSURER_REVIEW,
+        }:
             for item in request_obj.items.filter(requires_insurer_approval=True):
                 item.validation_status = EndorsementItem.ValidationStatus.VALID
                 item.save(update_fields=["validation_status", "updated_at"])
-            cls.transition(request_obj, EndorsementRequest.Status.SUBMITTED, actor, "Existing-member exception approved by insurer; request released for downstream processing.")
-            try:
-                endpoint = DispatchService.dispatch(request_obj)
-                target = EndorsementRequest.Status.SENT_TO_TPA if request_obj.policy.product == Policy.Product.GROUP_MEDICAL else EndorsementRequest.Status.CORE_DISPATCHED
-                cls.transition(request_obj, target, actor, f"Approved exception dispatched through {endpoint.get_transport_display()}.")
-            except Exception as exc:
-                request_obj.validation_errors = [*request_obj.validation_errors, f"Dispatch after approval failed: {exc}"]
-                request_obj.save(update_fields=["validation_errors", "updated_at"])
-                cls.transition(request_obj, EndorsementRequest.Status.FAILED, actor, "Dispatch after approval failed.", {"error": str(exc)})
-            return request_obj
-        cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "Changed TPA amount approved. TPA may continue processing.")
+            return cls._release_after_insurer_approval(request_obj, actor=actor, automatic=False)
+
+        if approval.approval_type == EndorsementApproval.ApprovalType.TPA_AMOUNT_CHANGE and approval.item_id:
+            approval.item.tpa_status = EndorsementItem.TPAStatus.APPROVED
+            approval.item.tpa_decision_comment = comment
+            approval.item.tpa_decided_by = actor
+            approval.item.tpa_decided_at = timezone.now()
+            approval.item.save(update_fields=["tpa_status", "tpa_decision_comment", "tpa_decided_by", "tpa_decided_at", "updated_at"])
+            if not request_obj.items.exclude(tpa_status=EndorsementItem.TPAStatus.APPROVED).exists():
+                cls.complete(request_obj, actor, request_obj.external_reference)
+            else:
+                cls.transition(request_obj, EndorsementRequest.Status.TPA_IN_PROGRESS, actor, "Changed TPA amount approved. Remaining TPA member processing can continue.")
         return request_obj
 
     @classmethod
@@ -1464,8 +1667,13 @@ class WorkflowService:
             raise ValueError("The endorsement still contains validation errors.")
         if request_obj.approvals.filter(status=EndorsementApproval.Status.PENDING).exists():
             raise ValueError("Pending approval(s) must be completed first.")
-        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL and request_obj.items.filter(card_number="").exists():
-            raise ValueError("Card number is mandatory for every Medical endorsement item before completion.")
+        if request_obj.policy.product == Policy.Product.GROUP_MEDICAL:
+            if request_obj.items.filter(card_number="").exists():
+                raise ValueError("Card number is mandatory for every Medical endorsement item before completion.")
+            if request_obj.items.filter(tpa_effective_date=None).exists():
+                raise ValueError("TPA effective date is mandatory for every Medical endorsement item before completion.")
+            if request_obj.items.exclude(tpa_status=EndorsementItem.TPAStatus.APPROVED).exists():
+                raise ValueError("Every Medical endorsement item must be approved by the TPA before completion.")
         if external_reference:
             request_obj.external_reference = external_reference
             request_obj.save(update_fields=["external_reference", "updated_at"])
@@ -1476,8 +1684,12 @@ class WorkflowService:
         request_obj.metadata = {**(request_obj.metadata or {}), "pre_query_status": request_obj.status}
         request_obj.save(update_fields=["metadata", "updated_at"])
         query = EndorsementQuery.objects.create(
-            request=request_obj, raised_by=actor, assigned_organization=request_obj.requester_organization,
-            subject=subject, message=message, due_at=SLAService.deadline(request_obj.policy.client_query_sla),
+            request=request_obj,
+            raised_by=actor,
+            assigned_organization=request_obj.requester_organization,
+            subject=subject,
+            message=message,
+            due_at=SLAService.deadline(request_obj.policy.client_query_sla),
         )
         cls.transition(request_obj, EndorsementRequest.Status.TPA_QUERY, actor, "Additional information requested from requester.")
         return query
@@ -1491,3 +1703,4 @@ class WorkflowService:
         query.save(update_fields=["response", "responded_by", "responded_at", "is_closed", "updated_at"])
         restore = (query.request.metadata or {}).get("pre_query_status") or EndorsementRequest.Status.TPA_IN_PROGRESS
         cls.transition(query.request, restore, actor, "Requester answered query.")
+
