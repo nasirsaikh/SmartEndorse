@@ -71,7 +71,7 @@ body{
 .se-status-ok,.se-status-completed,.se-status-valid,.se-status-auto_approved,.se-status-submitted{color:var(--color-success)}
 .se-status-warn,.se-status-needs_info,.se-status-tpa_query,.se-status-pending_insurer_approval,.se-status-pending_amount_approval,.se-status-existing,.se-status-approval_required{color:var(--color-warning)}
 .se-status-error,.se-status-failed,.se-status-rejected{color:var(--color-error)}
-.se-status-info,.se-status-sent_to_tpa,.se-status-core_dispatched,.se-status-tpa_in_progress{color:var(--color-info)}
+.se-status-info,.se-status-sent_to_tpa,.se-status-ready_for_core,.se-status-core_dispatched,.se-status-tpa_in_progress{color:var(--color-info)}
 
 .se-dropzone{
   position:relative;display:grid;min-height:12rem;place-items:center;border:1px dashed color-mix(in srgb,var(--color-primary) 55%,var(--se-line));
