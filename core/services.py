@@ -496,20 +496,19 @@ class FileIntakeService:
 
 
 class BulkRecoveryService:
-    """Resolve missing fields across editable exception cases without guessing ambiguous matches."""
+    """Resolve missing fields for one endorsement only, without guessing ambiguous matches."""
 
     MATCH_FIELDS = ("national_id", "member_no", "employee_no")
     EDITABLE_FIELDS = ("member_no", "employee_no", "national_id", "full_name", "relationship", "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date")
 
     @classmethod
-    def process(cls, upload, candidate_requests):
+    def process(cls, upload, endorsement):
         try:
             raw_rows, normalized_rows, metadata = FileIntakeService._extract(upload)
-            request_ids = [r.pk for r in candidate_requests]
-            items = EndorsementItem.objects.filter(request_id__in=request_ids).select_related("request", "request__policy", "plan")
+            items = endorsement.items.select_related("request", "request__policy", "plan")
             resolved = ambiguous = unmatched = 0
-            touched = set()
             outcomes = []
+
             for row_number, row in enumerate(normalized_rows, start=1):
                 item, matched_by, is_ambiguous = cls._match(items, row)
                 if is_ambiguous:
@@ -520,7 +519,8 @@ class BulkRecoveryService:
                     unmatched += 1
                     outcomes.append({"row": row_number, "status": "unmatched"})
                     continue
-                values = FileIntakeService._to_item_values(item.request, row)
+
+                values = FileIntakeService._to_item_values(endorsement, row)
                 before, changed = {}, {}
                 for field in cls.EDITABLE_FIELDS:
                     current = getattr(item, field)
@@ -528,34 +528,84 @@ class BulkRecoveryService:
                     if value not in (None, "") and current in (None, ""):
                         before[field] = json_safe(current)
                         setattr(item, field, value)
-                        changed[field] = json_safe(value)
+                        changed[field] = json_safe(value.pk if field == "plan" and value else value)
+
                 if not changed:
-                    outcomes.append({"row": row_number, "status": "matched_no_missing_fields", "item_id": item.pk, "request": item.request.reference, "matched_by": matched_by})
+                    outcomes.append({
+                        "row": row_number,
+                        "status": "matched_no_missing_fields",
+                        "item_id": item.pk,
+                        "matched_by": matched_by,
+                    })
                     continue
-                item.resolution_data = {**(item.resolution_data or {}), "last_bulk_recovery": {"source": upload.reference, "matched_by": matched_by, "fields": changed}}
-                item.extracted_data = {**(item.extracted_data or {}), "bulk_recovery_sources": [*((item.extracted_data or {}).get("bulk_recovery_sources", [])), json_safe(row.get("_source_raw", row))]}
+
+                item.resolution_data = {
+                    **(item.resolution_data or {}),
+                    "last_bulk_recovery": {
+                        "source": upload.reference,
+                        "matched_by": matched_by,
+                        "fields": changed,
+                    },
+                }
+                item.extracted_data = {
+                    **(item.extracted_data or {}),
+                    "bulk_recovery_sources": [
+                        *((item.extracted_data or {}).get("bulk_recovery_sources", [])),
+                        json_safe(row.get("_source_raw", row)),
+                    ],
+                }
                 item.save()
                 resolved += 1
-                touched.add(item.request_id)
+
                 WorkflowEvent.objects.create(
-                    request=item.request, actor=upload.uploaded_by, event_type="BULK_ITEM_RECOVERED",
+                    request=endorsement,
+                    actor=upload.uploaded_by,
+                    event_type="BULK_ITEM_RECOVERED",
                     description=f"Item {item.pk} recovered from bulk upload {upload.reference}.",
-                    payload=json_safe({"item_id": item.pk, "upload": upload.reference, "matched_by": matched_by, "before": before, "filled": changed}),
+                    payload=json_safe({
+                        "item_id": item.pk,
+                        "upload": upload.reference,
+                        "matched_by": matched_by,
+                        "before": before,
+                        "filled": changed,
+                    }),
                 )
-                outcomes.append({"row": row_number, "status": "resolved", "item_id": item.pk, "request": item.request.reference, "matched_by": matched_by, "filled": changed})
+                outcomes.append({
+                    "row": row_number,
+                    "status": "resolved",
+                    "item_id": item.pk,
+                    "matched_by": matched_by,
+                    "filled": changed,
+                })
+
             upload.resolved_count = resolved
             upload.ambiguous_count = ambiguous
             upload.unmatched_count = unmatched
             upload.status = RecoveryUpload.Status.PROCESSED if not ambiguous and not unmatched else RecoveryUpload.Status.PARTIAL
             upload.processing_error = ""
-            upload.extracted_payload = json_safe({"raw_rows": raw_rows, "normalized_rows": normalized_rows, "outcomes": outcomes, **metadata})
-            upload.save(update_fields=["resolved_count", "ambiguous_count", "unmatched_count", "status", "processing_error", "extracted_payload", "updated_at"])
-            return touched
+            upload.extracted_payload = json_safe({
+                "target_request_id": endorsement.pk,
+                "target_reference": endorsement.reference,
+                "raw_rows": raw_rows,
+                "normalized_rows": normalized_rows,
+                "outcomes": outcomes,
+                **metadata,
+            })
+            upload.save(update_fields=[
+                "resolved_count", "ambiguous_count", "unmatched_count", "status",
+                "processing_error", "extracted_payload", "updated_at",
+            ])
+            return resolved
         except Exception as exc:
             upload.status = RecoveryUpload.Status.FAILED
             upload.processing_error = str(exc)
-            upload.save(update_fields=["status", "processing_error", "updated_at"])
-            return set()
+            upload.extracted_payload = json_safe({
+                **(upload.extracted_payload or {}),
+                "target_request_id": endorsement.pk,
+                "target_reference": endorsement.reference,
+            })
+            upload.save(update_fields=["status", "processing_error", "extracted_payload", "updated_at"])
+            return 0
 
     @classmethod
     def _match(cls, items, row):
