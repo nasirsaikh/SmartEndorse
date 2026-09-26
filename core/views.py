@@ -18,13 +18,13 @@ from .access import (
 )
 from .forms import (
     ApprovalDecisionForm, BulkRecoveryForm, EndorsementCreateForm, EndorsementItemCorrectionForm,
-    ItemOCRFillForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
+    ItemOCRFillForm, ProfileForm, QueryForm, QueryResponseForm, SupplementalUploadForm, TPAItemProcessingForm,
 )
 from .models import (
     Attachment, BOOTSWATCH_THEMES, EndorsementApproval, EndorsementItem,
     EndorsementRequest, Policy, PolicyPlan, PortalNotification, RecoveryUpload, UserProfile, WorkflowEvent,
 )
-from .services import BulkRecoveryService, FileIntakeService, PricingEngine, ValidationService, WorkflowService, json_safe
+from .services import BulkRecoveryService, FileIntakeService, PricingEngine, SLAService, ValidationService, WorkflowService, json_safe
 
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,17 @@ def _chart_html(qs):
 def dashboard(request):
     qs = accessible_endorsements(request.user)
     total = qs.count()
-    completed = qs.filter(status=EndorsementRequest.Status.COMPLETED).count()
-    breached = sum(1 for item in qs.exclude(current_sla_due_at=None).exclude(status=EndorsementRequest.Status.COMPLETED) if item.sla_breached)
+    completed_qs = qs.filter(status=EndorsementRequest.Status.COMPLETED)
+    completed = completed_qs.count()
+    now = timezone.now()
+    breached = sum(
+        1 for item in qs.exclude(current_sla_due_at=None).exclude(status=EndorsementRequest.Status.COMPLETED)
+        if item.sla_breached
+    )
+    due_soon = qs.exclude(current_sla_due_at=None).exclude(status=EndorsementRequest.Status.COMPLETED).filter(
+        current_sla_due_at__gt=now,
+        current_sla_due_at__lte=now + timedelta(hours=4),
+    ).count()
     stp = qs.filter(stp_eligible=True).count()
     premium = qs.aggregate(total=Sum("premium_impact"))["total"] or 0
     chart_status, chart_trend = _chart_html(qs)
@@ -69,28 +78,68 @@ def dashboard(request):
         org_type = request.user.profile.organization.organization_type
     except Exception:
         org_type = ""
+
     tpa_queue = qs.filter(status__in=[
         EndorsementRequest.Status.SENT_TO_TPA,
         EndorsementRequest.Status.TPA_IN_PROGRESS,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+    ]).count()
+    approval_queue = qs.filter(status=EndorsementRequest.Status.PENDING_INSURER_APPROVAL).count()
+    correction_queue = qs.filter(status__in=[
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
+        EndorsementRequest.Status.TPA_QUERY,
     ]).count()
     exceptions = qs.filter(status__in=[
         EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
         EndorsementRequest.Status.FAILED,
         EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
         EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+        EndorsementRequest.Status.TPA_QUERY,
     ]).count()
+
+    completed_hours = [
+        max((item.completed_at - item.created_at).total_seconds() / 3600, 0)
+        for item in completed_qs
+        if item.completed_at
+    ]
+    average_tat_hours = round(sum(completed_hours) / len(completed_hours), 1) if completed_hours else 0
+    within_sla = 0
+    for item in completed_qs:
+        profiles = [item.policy.intake_sla, item.policy.validation_sla, item.policy.insurer_sla]
+        if item.policy.product == Policy.Product.GROUP_MEDICAL:
+            profiles.append(item.policy.tpa_sla)
+        target = sum(profile.target_hours for profile in profiles if profile)
+        if target and item.completed_at and (item.completed_at - item.created_at).total_seconds() <= target * 3600:
+            within_sla += 1
+    sla_compliance_rate = round((within_sla / completed * 100), 1) if completed else 0
+
     return render(request, "dashboard.html", {
-        "total": total, "completed": completed, "open_count": total - completed, "breached": breached,
-        "stp_rate": round((stp / total * 100), 1) if total else 0, "premium": premium,
-        "recent": qs.order_by("-created_at")[:10], "chart_status": chart_status, "chart_trend": chart_trend,
-        "org_type": org_type, "policy_count": accessible_policies(request.user).count(),
-        "can_create": can_create_endorsement(request.user), "tpa_queue": tpa_queue, "exceptions": exceptions,
+        "total": total,
+        "completed": completed,
+        "open_count": total - completed,
+        "breached": breached,
+        "due_soon": due_soon,
+        "stp_rate": round((stp / total * 100), 1) if total else 0,
+        "premium": premium,
+        "recent": qs.order_by("-created_at")[:10],
+        "chart_status": chart_status,
+        "chart_trend": chart_trend,
+        "org_type": org_type,
+        "policy_count": accessible_policies(request.user).count(),
+        "can_create": can_create_endorsement(request.user),
+        "tpa_queue": tpa_queue,
+        "approval_queue": approval_queue,
+        "correction_queue": correction_queue,
+        "exceptions": exceptions,
         "completion_rate": round((completed / total * 100), 1) if total else 0,
         "exception_rate": round((exceptions / total * 100), 1) if total else 0,
         "tpa_queue_rate": round((tpa_queue / total * 100), 1) if total else 0,
+        "average_tat_hours": average_tat_hours,
+        "sla_compliance_rate": sla_compliance_rate,
     })
-
 
 @login_required
 def request_list(request):
@@ -264,7 +313,11 @@ def create_request(request):
             endorsement.requester = request.user
             endorsement.requester_organization = request.user.profile.organization
             endorsement.currency = endorsement.policy.currency
+            endorsement.status = EndorsementRequest.Status.DRAFT
             endorsement.save()
+            endorsement.current_sla_due_at = SLAService.for_status(endorsement, EndorsementRequest.Status.DRAFT)
+            endorsement.save(update_fields=["current_sla_due_at", "updated_at"])
+
             if form.has_manual_item():
                 EndorsementItem.objects.create(request=endorsement, **form.manual_item_payload())
 
@@ -295,37 +348,122 @@ def create_request(request):
                 except Exception:
                     logger.exception("Initial evidence bundle failed for endorsement %s", endorsement.pk)
 
-            WorkflowEvent.objects.create(request=endorsement, actor=request.user, event_type="REQUEST_CREATED", description="Endorsement request created.")
-            WorkflowService.submit(endorsement, request.user)
-            if endorsement.status == EndorsementRequest.Status.NEEDS_INFO:
-                messages.warning(request, "Request created, but processing is blocked until all validation errors are corrected.")
-            elif endorsement.status in {EndorsementRequest.Status.PENDING_INSURER_APPROVAL, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}:
-                messages.warning(request, "Request requires approval before it can continue.")
-            elif endorsement.status == EndorsementRequest.Status.FAILED:
-                messages.error(request, "Validation passed, but automatic dispatch failed. Insurer operations can review the exception.")
-            else:
-                messages.success(request, f"{endorsement.reference} submitted successfully.")
-            return redirect("endorsement_detail", pk=endorsement.pk)
+            WorkflowEvent.objects.create(
+                request=endorsement,
+                actor=request.user,
+                event_type="REQUEST_CREATED",
+                description="Endorsement draft created. Intake is ready for member/file review before validation.",
+            )
+            messages.success(
+                request,
+                f"{endorsement.reference} created as Draft. Review the extracted members and files in Intake, make any corrections, then continue to Validation.",
+            )
+            return redirect(f"/endorsements/{endorsement.pk}/?step=intake")
     else:
         form = EndorsementCreateForm(policies=policies)
     return render(request, "endorsements/form.html", {"form": form})
-
 
 def _get_accessible_request(user, pk):
     return get_object_or_404(accessible_endorsements(user).prefetch_related("items__plan", "attachments", "events", "queries", "approvals__assigned_organization"), pk=pk)
 
 
-def _wizard(endorsement):
-    stages = [
-        ("Intake", {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.VALIDATING, EndorsementRequest.Status.NEEDS_INFO}),
-        ("Validated", {EndorsementRequest.Status.SUBMITTED, EndorsementRequest.Status.PENDING_INSURER_APPROVAL}),
-        ("Approved", {EndorsementRequest.Status.AUTO_APPROVED, EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL}),
-        ("TPA / Core", {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.CORE_DISPATCHED}),
-        ("Completed", {EndorsementRequest.Status.COMPLETED}),
-    ]
-    index = next((i for i, (_, states) in enumerate(stages) if endorsement.status in states), 0)
-    return [{"label": label, "state": "done" if i < index else "active" if i == index else "pending"} for i, (label, _) in enumerate(stages)]
+def _status_stage_key(endorsement):
+    status = endorsement.status
+    if status in {
+        EndorsementRequest.Status.DRAFT,
+        EndorsementRequest.Status.NEEDS_INFO,
+        EndorsementRequest.Status.REJECTED,
+    }:
+        return "intake"
+    if status in {
+        EndorsementRequest.Status.VALIDATING,
+        EndorsementRequest.Status.SUBMITTED,
+    }:
+        return "validation"
+    if status in {
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL,
+        EndorsementRequest.Status.AUTO_APPROVED,
+    }:
+        return "approval"
+    if status in {
+        EndorsementRequest.Status.SENT_TO_TPA,
+        EndorsementRequest.Status.TPA_IN_PROGRESS,
+        EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.READY_FOR_CORE,
+        EndorsementRequest.Status.CORE_DISPATCHED,
+        EndorsementRequest.Status.FAILED,
+    }:
+        return "tpa"
+    if status == EndorsementRequest.Status.COMPLETED:
+        return "completed"
+    return "intake"
 
+
+def _wizard(endorsement):
+    is_medical = endorsement.policy.product == Policy.Product.GROUP_MEDICAL
+    definitions = [
+        ("intake", "Intake", endorsement.policy.intake_sla or endorsement.policy.client_query_sla),
+        ("validation", "Validation", endorsement.policy.validation_sla or endorsement.policy.insurer_sla),
+        ("approval", "Insurer Approval", endorsement.policy.insurer_sla),
+        ("tpa", "TPA" if is_medical else "Operations", endorsement.policy.tpa_sla if is_medical else endorsement.policy.insurer_sla),
+        ("completed", "Completed", None),
+    ]
+    keys = [row[0] for row in definitions]
+    active_key = _status_stage_key(endorsement)
+    active_index = keys.index(active_key)
+
+    stage_for_status = {
+        EndorsementRequest.Status.DRAFT: "intake",
+        EndorsementRequest.Status.NEEDS_INFO: "intake",
+        EndorsementRequest.Status.REJECTED: "intake",
+        EndorsementRequest.Status.VALIDATING: "validation",
+        EndorsementRequest.Status.SUBMITTED: "validation",
+        EndorsementRequest.Status.PENDING_INSURER_APPROVAL: "approval",
+        EndorsementRequest.Status.PENDING_AMOUNT_APPROVAL: "approval",
+        EndorsementRequest.Status.AUTO_APPROVED: "approval",
+        EndorsementRequest.Status.SENT_TO_TPA: "tpa",
+        EndorsementRequest.Status.TPA_IN_PROGRESS: "tpa",
+        EndorsementRequest.Status.TPA_QUERY: "tpa",
+        EndorsementRequest.Status.READY_FOR_CORE: "tpa",
+        EndorsementRequest.Status.CORE_DISPATCHED: "tpa",
+        EndorsementRequest.Status.FAILED: "tpa",
+        EndorsementRequest.Status.COMPLETED: "completed",
+    }
+    durations = {key: 0.0 for key in keys}
+    current_status = EndorsementRequest.Status.DRAFT
+    cursor = endorsement.created_at
+    end_time = endorsement.completed_at or timezone.now()
+    for event in endorsement.events.filter(event_type="STATUS_CHANGE").order_by("created_at"):
+        if event.created_at < cursor:
+            continue
+        stage_key = stage_for_status.get(current_status, "intake")
+        durations[stage_key] += max((event.created_at - cursor).total_seconds() / 3600, 0)
+        current_status = event.to_status or current_status
+        cursor = event.created_at
+    if cursor < end_time:
+        durations[stage_for_status.get(current_status, active_key)] += max((end_time - cursor).total_seconds() / 3600, 0)
+
+    steps = []
+    for index, (key, label, profile) in enumerate(definitions):
+        required = profile.target_hours if profile else None
+        actual = round(durations.get(key, 0.0), 1)
+        if endorsement.status == EndorsementRequest.Status.COMPLETED:
+            state = "done" if key != "completed" else "active"
+        else:
+            state = "done" if index < active_index else "active" if index == active_index else "pending"
+        steps.append({
+            "key": key,
+            "label": label,
+            "state": state,
+            "required_hours": required,
+            "actual_hours": actual,
+            "breached": bool(required is not None and actual > required),
+        })
+
+    target_total = sum(step["required_hours"] or 0 for step in steps if step["key"] != "completed")
+    actual_total = round(max(((endorsement.completed_at or timezone.now()) - endorsement.created_at).total_seconds() / 3600, 0), 1)
+    return steps, target_total, actual_total
 
 @login_required
 def request_detail(request, pk):
