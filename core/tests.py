@@ -593,7 +593,8 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         payload = client.post.call_args.kwargs["json"]
         self.assertEqual(url, "http://127.0.0.1:11434/api/generate")
         self.assertEqual(payload["model"], "bakllava:latest")
-        self.assertEqual(payload["format"], "json")
+        self.assertIsInstance(payload["format"], dict)
+        self.assertIn("items", payload["format"]["properties"])
         self.assertFalse(payload["stream"])
         self.assertTrue(payload["images"])
         self.assertIn('"items"', payload["prompt"])
@@ -710,7 +711,7 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         }
 
         mapper_response = MagicMock()
-        mapper_response.raise_for_status.return_value = None
+        mapper_response.raise_for_status.return_value = mapper_response
         mapper_response.json.return_value = {
             "message": {
                 "content": '{"items":[{"member_no":null,"employee_no":"E100","national_id":null,"full_name":"Aisha","relationship":"Employee","date_of_birth":null,"gender":null,"plan_code":null,"annual_salary":null,"sum_assured":null,"effective_date":null}]}'
