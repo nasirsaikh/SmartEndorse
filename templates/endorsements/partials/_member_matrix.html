@@ -12,8 +12,7 @@
       <thead>
         <tr>
           <th>Status</th><th>Member</th><th>Relationship / plan</th><th>Effective</th>
-          <th>Card no.</th><th>TPA effective</th><th class="num">System impact</th>
-          <th class="num">TPA amount</th><th>Actions</th>
+          <th>Card no.</th><th>TPA effective</th><th class="num">Amount</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -34,8 +33,17 @@
           <td class="mono">{{ item.effective_date|default:endorsement.effective_date|date:"d M Y" }}</td>
           <td class="mono">{{ item.card_number|default:"—" }}</td>
           <td class="mono">{{ item.tpa_effective_date|date:"d M Y"|default:"—" }}</td>
-          <td class="num mono">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</td>
-          <td class="num mono">{% if item.tpa_premium_amount != None %}{{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}{% else %}—{% endif %}</td>
+          <td class="num mono">
+            {% if item.tpa_premium_amount != None and item.tpa_premium_amount != item.premium_impact %}
+              <span class="opacity-45 line-through">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</span>
+              <i class="bi bi-arrow-right mx-1 opacity-40"></i>
+              <strong class="text-warning">{{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}</strong>
+            {% elif item.tpa_premium_amount != None %}
+              {{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}
+            {% else %}
+              {{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}
+            {% endif %}
+          </td>
           <td class="whitespace-nowrap">
             {% if allow_member_edit and can_edit %}
               <a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>
@@ -46,17 +54,11 @@
               </form>
               {% endif %}
             {% endif %}
-            <details class="dropdown dropdown-end inline-block">
-              <summary class="btn btn-ghost btn-xs"><i class="bi bi-braces"></i>SOURCE</summary>
-              <div class="dropdown-content z-30 mt-2 w-[min(36rem,90vw)] rounded-box border border-base-content/10 bg-base-100 p-3 shadow-2xl">
-                <pre class="se-json">{{ item.extracted_data }}</pre>
-              </div>
-            </details>
           </td>
         </tr>
         {% if show_tpa_controls and can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
         <tr>
-          <td colspan="9" class="bg-info/5">
+          <td colspan="8" class="bg-info/5">
             <form class="grid gap-3 md:grid-cols-[1.4fr_1.2fr_1.4fr_auto] md:items-end" method="post" action="{% url 'endorsement_tpa_item' endorsement.pk item.pk %}">
               {% csrf_token %}
               <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA card number *</span><input class="input input-bordered w-full" name="card_number" value="{{ item.card_number }}" required></label>
@@ -69,7 +71,7 @@
         </tr>
         {% endif %}
       {% empty %}
-        <tr><td colspan="9" class="py-12 text-center opacity-50">No member records are available.</td></tr>
+        <tr><td colspan="8" class="py-12 text-center opacity-50">No member records are available.</td></tr>
       {% endfor %}
       </tbody>
     </table>
