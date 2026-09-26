@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -10,9 +11,23 @@ def default_weekend_days():
     return [4, 5]
 
 
+BOOTSWATCH_THEMES = [
+    ("default", "Default"), ("brite", "Brite"), ("cerulean", "Cerulean"),
+    ("cosmo", "Cosmo"), ("cyborg", "Cyborg"), ("darkly", "Darkly"),
+    ("flatly", "Flatly"), ("journal", "Journal"), ("litera", "Litera"),
+    ("lumen", "Lumen"), ("lux", "Lux"), ("materia", "Materia"),
+    ("minty", "Minty"), ("morph", "Morph"), ("pulse", "Pulse"),
+    ("quartz", "Quartz"), ("sandstone", "Sandstone"), ("simplex", "Simplex"),
+    ("sketchy", "Sketchy"), ("slate", "Slate"), ("solar", "Solar"),
+    ("spacelab", "Spacelab"), ("superhero", "Superhero"), ("united", "United"),
+    ("vapor", "Vapor"), ("yeti", "Yiti / Yeti"),
+]
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         abstract = True
 
@@ -25,12 +40,14 @@ class Organization(TimeStampedModel):
         AGENT = "AGENT", "Agent"
         CHANNEL = "CHANNEL", "Channel Partner"
         TPA = "TPA", "TPA"
+
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=50, unique=True)
     organization_type = models.CharField(max_length=20, choices=Type.choices)
     notification_email = models.EmailField(blank=True)
     is_active = models.BooleanField(default=True)
     metadata = models.JSONField(default=dict, blank=True)
+
     def __str__(self):
         return f"{self.code} - {self.name}"
 
@@ -55,17 +72,30 @@ class UserProfile(TimeStampedModel):
         TPA_PROCESSOR = "TPA_PROCESSOR", "TPA Processor"
         TPA_VIEWER = "TPA_VIEWER", "TPA Viewer"
         AUDITOR = "AUDITOR", "Auditor"
+
+    class ColorMode(models.TextChoices):
+        LIGHT = "light", "Light"
+        DARK = "dark", "Dark"
+        AUTO = "auto", "System"
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="users")
     role = models.CharField(max_length=30, choices=Role.choices)
     job_title = models.CharField(max_length=120, blank=True)
     phone = models.CharField(max_length=40, blank=True)
     can_override_workflow = models.BooleanField(default=False)
+    portal_theme = models.CharField(max_length=30, choices=BOOTSWATCH_THEMES, default="default")
+    color_mode = models.CharField(max_length=10, choices=ColorMode.choices, default=ColorMode.AUTO)
+
     def __str__(self):
         return f"{self.user.username} / {self.get_role_display()}"
 
 
 class PlatformConfiguration(TimeStampedModel):
+    class AmountApprovalParty(models.TextChoices):
+        INSURER = "INSURER", "Insurance company"
+        CLIENT = "CLIENT", "Client"
+
     name = models.CharField(max_length=80, default="Default", unique=True)
     auto_stp_enabled = models.BooleanField(default=True, verbose_name="Enable straight-through processing")
     default_currency = models.CharField(max_length=3, default="OMR")
@@ -74,8 +104,18 @@ class PlatformConfiguration(TimeStampedModel):
     require_ai_for_unstructured_uploads = models.BooleanField(default=False)
     enable_email_notifications = models.BooleanField(default=True)
     enable_sla_escalations = models.BooleanField(default=True)
+    enable_portal_notifications = models.BooleanField(default=True)
+    endorsement_expiry_cutoff_days = models.PositiveSmallIntegerField(
+        default=30,
+        help_text="Block new/processing endorsements when policy has fewer than this many days remaining. Policy-level override takes precedence.",
+    )
+    tpa_amount_approval_party = models.CharField(
+        max_length=12, choices=AmountApprovalParty.choices, default=AmountApprovalParty.INSURER,
+        help_text="Who must approve a TPA premium/refund amount changed from the system-calculated amount.",
+    )
     support_email = models.EmailField(blank=True)
     settings_json = models.JSONField(default=dict, blank=True)
+
     def __str__(self):
         return self.name
 
@@ -86,6 +126,7 @@ class AIProviderConfig(TimeStampedModel):
         OPENAI = "OPENAI", "OpenAI"
         ANTHROPIC = "ANTHROPIC", "Anthropic Claude"
         OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE", "OpenAI-compatible API"
+
     name = models.CharField(max_length=100)
     provider = models.CharField(max_length=30, choices=Provider.choices)
     model_name = models.CharField(max_length=150)
@@ -96,6 +137,7 @@ class AIProviderConfig(TimeStampedModel):
     is_active = models.BooleanField(default=False)
     supports_vision = models.BooleanField(default=False)
     options = models.JSONField(default=dict, blank=True)
+
     def __str__(self):
         return f"{self.name} ({self.provider}: {self.model_name})"
 
@@ -107,12 +149,15 @@ class SLAProfile(TimeStampedModel):
         TPA_PROCESSING = "TPA_PROCESSING", "TPA processing"
         QUERY_RESPONSE = "QUERY_RESPONSE", "Query response"
         CORE_PROCESSING = "CORE_PROCESSING", "Core-system processing"
+        APPROVAL = "APPROVAL", "Approval"
+
     name = models.CharField(max_length=120)
     stage = models.CharField(max_length=30, choices=Stage.choices)
     target_hours = models.PositiveIntegerField(default=24)
     warning_hours = models.PositiveIntegerField(default=4)
     business_hours_only = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+
     def __str__(self):
         return f"{self.name} - {self.get_stage_display()} ({self.target_hours}h)"
 
@@ -121,10 +166,12 @@ class Policy(TimeStampedModel):
     class Product(models.TextChoices):
         GROUP_MEDICAL = "GROUP_MEDICAL", "Group Medical"
         GROUP_LIFE = "GROUP_LIFE", "Group Life"
+
     class RatingMethod(models.TextChoices):
         FLAT_ANNUAL = "FLAT_ANNUAL", "Flat annual / plan rate"
         PER_MILLE_SUM_ASSURED = "PER_MILLE_SUM_ASSURED", "Per mille of sum assured"
         PERCENT_OF_SALARY = "PERCENT_OF_SALARY", "Percent of annual salary"
+
     policy_number = models.CharField(max_length=80, unique=True)
     policy_name = models.CharField(max_length=200)
     product = models.CharField(max_length=30, choices=Product.choices)
@@ -145,11 +192,16 @@ class Policy(TimeStampedModel):
     mandatory_documents_deletion = models.JSONField(default=list, blank=True)
     day_count_basis = models.PositiveSmallIntegerField(default=365)
     allow_backdated_days = models.PositiveSmallIntegerField(default=0)
+    endorsement_expiry_cutoff_days = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Optional override of global cutoff. Example 30 or 60. Zero allows processing until policy expiry.",
+    )
     auto_stp = models.BooleanField(default=True)
     insurer_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="insurer_policies")
     tpa_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="tpa_policies")
     client_query_sla = models.ForeignKey(SLAProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="query_policies")
     is_active = models.BooleanField(default=True)
+
     def __str__(self):
         return f"{self.policy_number} - {self.policy_name}"
 
@@ -161,8 +213,10 @@ class PolicyPlan(TimeStampedModel):
     annual_rate = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))])
     relationship_rates = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
+
     class Meta:
         constraints = [models.UniqueConstraint(fields=["policy", "code"], name="uq_policy_plan_code")]
+
     def __str__(self):
         return f"{self.policy.policy_number} / {self.code}"
 
@@ -173,8 +227,10 @@ class PolicyAccess(TimeStampedModel):
     can_create = models.BooleanField(default=True)
     can_view_premium = models.BooleanField(default=True)
     can_view_members = models.BooleanField(default=True)
+
     class Meta:
         constraints = [models.UniqueConstraint(fields=["policy", "organization"], name="uq_policy_org_access")]
+
     def __str__(self):
         return f"{self.organization.code} -> {self.policy.policy_number}"
 
@@ -194,8 +250,10 @@ class PolicyMember(TimeStampedModel):
     coverage_from = models.DateField(null=True, blank=True)
     coverage_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+
     class Meta:
         constraints = [models.UniqueConstraint(fields=["policy", "member_no"], name="uq_policy_member_no")]
+
     def __str__(self):
         return f"{self.member_no} - {self.full_name}"
 
@@ -204,9 +262,11 @@ class IntegrationEndpoint(TimeStampedModel):
     class OwnerType(models.TextChoices):
         INSURER_CORE = "INSURER_CORE", "Insurer core system"
         TPA = "TPA", "TPA"
+
     class Transport(models.TextChoices):
         API = "API", "REST API"
         EMAIL = "EMAIL", "Email"
+
     name = models.CharField(max_length=120)
     owner_type = models.CharField(max_length=20, choices=OwnerType.choices)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="integration_endpoints")
@@ -216,6 +276,7 @@ class IntegrationEndpoint(TimeStampedModel):
     recipient_email = models.EmailField(blank=True)
     auth_headers = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
+
     def __str__(self):
         return self.name
 
@@ -224,11 +285,14 @@ class EndorsementRequest(TimeStampedModel):
     class Type(models.TextChoices):
         ADDITION = "ADDITION", "Addition"
         DELETION = "DELETION", "Deletion"
+
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
         VALIDATING = "VALIDATING", "Validating"
         NEEDS_INFO = "NEEDS_INFO", "Needs information"
         SUBMITTED = "SUBMITTED", "Submitted"
+        PENDING_INSURER_APPROVAL = "PENDING_INSURER_APPROVAL", "Pending insurer approval"
+        PENDING_AMOUNT_APPROVAL = "PENDING_AMOUNT_APPROVAL", "Pending amount approval"
         AUTO_APPROVED = "AUTO_APPROVED", "Auto approved"
         SENT_TO_TPA = "SENT_TO_TPA", "Sent to TPA"
         TPA_IN_PROGRESS = "TPA_IN_PROGRESS", "TPA in progress"
@@ -238,6 +302,7 @@ class EndorsementRequest(TimeStampedModel):
         REJECTED = "REJECTED", "Rejected"
         CANCELLED = "CANCELLED", "Cancelled"
         FAILED = "FAILED", "Automation failed"
+
     reference = models.CharField(max_length=32, unique=True, editable=False)
     policy = models.ForeignKey(Policy, on_delete=models.PROTECT, related_name="endorsements")
     endorsement_type = models.CharField(max_length=20, choices=Type.choices)
@@ -257,18 +322,29 @@ class EndorsementRequest(TimeStampedModel):
     external_reference = models.CharField(max_length=120, blank=True)
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_endorsements")
     metadata = models.JSONField(default=dict, blank=True)
+
     def save(self, *args, **kwargs):
         if not self.reference:
             self.reference = f"END-{timezone.now():%Y%m}-{uuid.uuid4().hex[:8].upper()}"
         super().save(*args, **kwargs)
+
     @property
     def sla_breached(self):
-        return bool(self.current_sla_due_at and self.status not in {self.Status.COMPLETED, self.Status.CANCELLED, self.Status.REJECTED} and timezone.now() > self.current_sla_due_at)
+        closed = {self.Status.COMPLETED, self.Status.CANCELLED, self.Status.REJECTED}
+        return bool(self.current_sla_due_at and self.status not in closed and timezone.now() > self.current_sla_due_at)
+
     def __str__(self):
         return self.reference
 
 
 class EndorsementItem(TimeStampedModel):
+    class ValidationStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending validation"
+        VALID = "VALID", "Correct"
+        ERROR = "ERROR", "Error"
+        EXISTING = "EXISTING", "Existing record"
+        APPROVAL_REQUIRED = "APPROVAL_REQUIRED", "Approval required"
+
     request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="items")
     member_no = models.CharField(max_length=80, blank=True)
     employee_no = models.CharField(max_length=80, blank=True)
@@ -283,9 +359,16 @@ class EndorsementItem(TimeStampedModel):
     effective_date = models.DateField(null=True, blank=True)
     extracted_data = models.JSONField(default=dict, blank=True)
     validation_errors = models.JSONField(default=list, blank=True)
+    validation_status = models.CharField(max_length=24, choices=ValidationStatus.choices, default=ValidationStatus.PENDING)
+    is_existing_record = models.BooleanField(default=False)
+    requires_insurer_approval = models.BooleanField(default=False)
+    resolution_data = models.JSONField(default=dict, blank=True)
     annual_premium = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
     prorata_factor = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0.000000"))
     premium_impact = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"))
+    card_number = models.CharField(max_length=100, blank=True)
+    tpa_premium_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+
     def __str__(self):
         return self.full_name or self.member_no or f"Item {self.pk}"
 
@@ -296,6 +379,7 @@ class Attachment(TimeStampedModel):
         PDF = "PDF", "PDF"
         IMAGE = "IMAGE", "Image"
         OTHER = "OTHER", "Other"
+
     request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="attachments")
     file = models.FileField(upload_to="endorsements/%Y/%m/")
     original_name = models.CharField(max_length=255)
@@ -303,8 +387,39 @@ class Attachment(TimeStampedModel):
     processed = models.BooleanField(default=False)
     processing_error = models.TextField(blank=True)
     extracted_payload = models.JSONField(default=dict, blank=True)
+    is_supplemental = models.BooleanField(default=False)
+
     def __str__(self):
         return self.original_name
+
+
+class RecoveryUpload(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSED = "PROCESSED", "Processed"
+        PARTIAL = "PARTIAL", "Partially matched"
+        FAILED = "FAILED", "Failed"
+
+    reference = models.CharField(max_length=32, unique=True, editable=False)
+    uploaded_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="recovery_uploads")
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="recovery_uploads")
+    file = models.FileField(upload_to="recovery/%Y/%m/")
+    original_name = models.CharField(max_length=255)
+    kind = models.CharField(max_length=20, choices=Attachment.Kind.choices, default=Attachment.Kind.OTHER)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    resolved_count = models.PositiveIntegerField(default=0)
+    ambiguous_count = models.PositiveIntegerField(default=0)
+    unmatched_count = models.PositiveIntegerField(default=0)
+    processing_error = models.TextField(blank=True)
+    extracted_payload = models.JSONField(default=dict, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"REC-{timezone.now():%Y%m}-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.reference} - {self.original_name}"
 
 
 class EndorsementQuery(TimeStampedModel):
@@ -318,8 +433,59 @@ class EndorsementQuery(TimeStampedModel):
     due_at = models.DateTimeField(null=True, blank=True)
     responded_at = models.DateTimeField(null=True, blank=True)
     is_closed = models.BooleanField(default=False)
+
     def __str__(self):
         return f"{self.request.reference}: {self.subject}"
+
+
+class EndorsementApproval(TimeStampedModel):
+    class ApprovalType(models.TextChoices):
+        EXISTING_MEMBER = "EXISTING_MEMBER", "Existing member exception"
+        TPA_AMOUNT_CHANGE = "TPA_AMOUNT_CHANGE", "TPA amount change"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    request = models.ForeignKey(EndorsementRequest, on_delete=models.CASCADE, related_name="approvals")
+    item = models.ForeignKey(EndorsementItem, on_delete=models.CASCADE, related_name="approvals", null=True, blank=True)
+    approval_type = models.CharField(max_length=30, choices=ApprovalType.choices)
+    assigned_organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="endorsement_approvals")
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="requested_endorsement_approvals")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    reason = models.TextField(blank=True)
+    old_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    new_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="decided_endorsement_approvals")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_comment = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.request.reference} / {self.get_approval_type_display()} / {self.get_status_display()}"
+
+
+class PortalNotification(TimeStampedModel):
+    class Level(models.TextChoices):
+        INFO = "INFO", "Info"
+        SUCCESS = "SUCCESS", "Success"
+        WARNING = "WARNING", "Warning"
+        DANGER = "DANGER", "Danger"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="portal_notifications")
+    title = models.CharField(max_length=180)
+    message = models.TextField()
+    level = models.CharField(max_length=12, choices=Level.choices, default=Level.INFO)
+    link = models.CharField(max_length=500, blank=True)
+    is_read = models.BooleanField(default=False)
+    browser_notified = models.BooleanField(default=False)
+    payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.title}"
 
 
 class WorkflowEvent(TimeStampedModel):
@@ -330,7 +496,9 @@ class WorkflowEvent(TimeStampedModel):
     to_status = models.CharField(max_length=30, blank=True)
     description = models.TextField(blank=True)
     payload = models.JSONField(default=dict, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
+
     def __str__(self):
         return f"{self.request.reference} / {self.event_type}"

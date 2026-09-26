@@ -1,9 +1,11 @@
 from django import forms
 from django.contrib import admin
+
 from .models import (
-    AIProviderConfig, Attachment, EndorsementItem, EndorsementQuery, EndorsementRequest,
-    IntegrationEndpoint, Organization, PlatformConfiguration, Policy, PolicyAccess,
-    PolicyMember, PolicyPlan, SLAProfile, UserProfile, WorkflowEvent,
+    AIProviderConfig, Attachment, EndorsementApproval, EndorsementItem, EndorsementQuery,
+    EndorsementRequest, IntegrationEndpoint, Organization, PlatformConfiguration,
+    Policy, PolicyAccess, PolicyMember, PolicyPlan, PortalNotification, RecoveryUpload, SLAProfile,
+    UserProfile, WorkflowEvent,
 )
 
 
@@ -23,14 +25,23 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "organization", "role", "job_title", "can_override_workflow")
-    list_filter = ("role", "organization__organization_type")
+    list_display = ("user", "organization", "role", "portal_theme", "color_mode", "can_override_workflow")
+    list_filter = ("role", "organization__organization_type", "portal_theme", "color_mode")
     search_fields = ("user__username", "user__email", "organization__name")
 
 
 @admin.register(PlatformConfiguration)
 class PlatformConfigurationAdmin(admin.ModelAdmin):
-    list_display = ("name", "auto_stp_enabled", "default_currency", "enable_email_notifications", "enable_sla_escalations")
+    list_display = (
+        "name", "auto_stp_enabled", "endorsement_expiry_cutoff_days",
+        "tpa_amount_approval_party", "enable_email_notifications", "enable_portal_notifications",
+        "enable_sla_escalations",
+    )
+    fieldsets = (
+        ("Processing", {"fields": ("name", "auto_stp_enabled", "default_currency", "maximum_upload_mb", "endorsement_expiry_cutoff_days", "tpa_amount_approval_party")}),
+        ("Notifications & SLA", {"fields": ("enable_email_notifications", "enable_portal_notifications", "enable_sla_escalations", "support_email", "weekend_days")}),
+        ("AI / advanced", {"fields": ("require_ai_for_unstructured_uploads", "settings_json")}),
+    )
 
 
 @admin.register(AIProviderConfig)
@@ -39,6 +50,7 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
     list_display = ("name", "provider", "model_name", "is_active", "supports_vision", "updated_at")
     list_filter = ("provider", "is_active", "supports_vision")
     search_fields = ("name", "model_name")
+
     def save_model(self, request, obj, form, change):
         if obj.is_active:
             AIProviderConfig.objects.exclude(pk=obj.pk).update(is_active=False)
@@ -63,14 +75,17 @@ class AccessInline(admin.TabularInline):
 
 @admin.register(Policy)
 class PolicyAdmin(admin.ModelAdmin):
-    list_display = ("policy_number", "policy_name", "product", "client", "tpa", "effective_from", "effective_to", "rating_method", "auto_stp", "is_active")
+    list_display = (
+        "policy_number", "policy_name", "product", "client", "tpa", "effective_from", "effective_to",
+        "endorsement_expiry_cutoff_days", "rating_method", "auto_stp", "is_active",
+    )
     list_filter = ("product", "rating_method", "auto_stp", "is_active", "tpa")
     search_fields = ("policy_number", "policy_name", "client__name", "broker_code", "agent_code", "channel_code")
     inlines = [PlanInline, AccessInline]
     fieldsets = (
         ("Identity", {"fields": ("policy_number", "policy_name", "product", "insurer", "client", "tpa", "is_active")}),
         ("Distribution", {"fields": ("broker_code", "agent_code", "channel_code")}),
-        ("Period & pricing", {"fields": ("effective_from", "effective_to", "currency", "rating_method", "rating_parameters", "day_count_basis", "allow_backdated_days")}),
+        ("Period & pricing", {"fields": ("effective_from", "effective_to", "endorsement_expiry_cutoff_days", "currency", "rating_method", "rating_parameters", "day_count_basis", "allow_backdated_days")}),
         ("Automation rules", {"fields": ("auto_stp", "required_fields_addition", "required_fields_deletion", "mandatory_documents_addition", "mandatory_documents_deletion")}),
         ("SLA", {"fields": ("insurer_sla", "tpa_sla", "client_query_sla")}),
     )
@@ -86,28 +101,61 @@ class PolicyMemberAdmin(admin.ModelAdmin):
 class ItemInline(admin.TabularInline):
     model = EndorsementItem
     extra = 0
-    readonly_fields = ("annual_premium", "prorata_factor", "premium_impact")
+    readonly_fields = ("validation_status", "annual_premium", "prorata_factor", "premium_impact", "extracted_data", "resolution_data")
+
+
+class ApprovalInline(admin.TabularInline):
+    model = EndorsementApproval
+    extra = 0
+    readonly_fields = ("approval_type", "assigned_organization", "status", "requested_by", "old_amount", "new_amount", "decided_by", "decided_at")
 
 
 @admin.register(EndorsementRequest)
 class EndorsementRequestAdmin(admin.ModelAdmin):
-    list_display = ("reference", "policy", "endorsement_type", "status", "requester_organization", "stp_eligible", "premium_impact", "current_sla_due_at", "created_at")
+    list_display = (
+        "reference", "policy", "endorsement_type", "status", "requester_organization", "stp_eligible",
+        "premium_impact", "current_sla_due_at", "created_at",
+    )
     list_filter = ("status", "endorsement_type", "stp_eligible", "policy__product", "policy__tpa")
     search_fields = ("reference", "policy__policy_number", "requester__username", "requester_organization__name", "external_reference")
     readonly_fields = ("reference", "validation_score", "premium_impact", "submitted_at", "completed_at", "created_at", "updated_at")
-    inlines = [ItemInline]
+    inlines = [ItemInline, ApprovalInline]
 
 
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
-    list_display = ("original_name", "request", "kind", "processed", "created_at")
-    list_filter = ("kind", "processed")
+    list_display = ("original_name", "request", "kind", "is_supplemental", "processed", "created_at")
+    list_filter = ("kind", "is_supplemental", "processed")
+    readonly_fields = ("extracted_payload", "processing_error")
+
+
+@admin.register(EndorsementApproval)
+class EndorsementApprovalAdmin(admin.ModelAdmin):
+    list_display = ("request", "approval_type", "item", "assigned_organization", "status", "old_amount", "new_amount", "decided_by", "decided_at")
+    list_filter = ("approval_type", "status", "assigned_organization")
+    search_fields = ("request__reference", "reason", "decision_comment")
 
 
 @admin.register(EndorsementQuery)
 class EndorsementQueryAdmin(admin.ModelAdmin):
     list_display = ("request", "subject", "raised_by", "assigned_organization", "due_at", "is_closed")
     list_filter = ("is_closed", "assigned_organization")
+
+
+@admin.register(RecoveryUpload)
+class RecoveryUploadAdmin(admin.ModelAdmin):
+    list_display = ("reference", "original_name", "organization", "status", "resolved_count", "ambiguous_count", "unmatched_count", "created_at")
+    list_filter = ("status", "kind", "organization")
+    search_fields = ("reference", "original_name", "uploaded_by__username")
+    readonly_fields = ("reference", "resolved_count", "ambiguous_count", "unmatched_count", "processing_error", "extracted_payload", "created_at", "updated_at")
+
+
+
+@admin.register(PortalNotification)
+class PortalNotificationAdmin(admin.ModelAdmin):
+    list_display = ("user", "title", "level", "is_read", "created_at")
+    list_filter = ("level", "is_read")
+    search_fields = ("user__username", "title", "message")
 
 
 @admin.register(WorkflowEvent)

@@ -3,58 +3,71 @@
 {% block page_title %}New Endorsement Request{% endblock %}
 {% block content %}
 <div class="row g-4">
-  <div class="col-xl-8">
-    <form method="post" enctype="multipart/form-data" class="panel p-4">
+  <div class="col-xxl-9 col-xl-8">
+    <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="panel p-4" x-data="fileDropzone()">
       {% csrf_token %}
       {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
-      <div class="section-title">1. Policy & effective date</div>
+
+      <div class="section-title"><i class="bi bi-shield-check"></i> Policy & endorsement control</div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><label class="form-label">Policy</label>{{ form.policy }}{{ form.policy.errors }}</div>
-        <div class="col-md-3"><label class="form-label">Type</label>{{ form.endorsement_type }}{{ form.endorsement_type.errors }}</div>
-        <div class="col-md-3"><label class="form-label">Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
+        <div class="col-lg-6"><div class="form-floating">{{ form.policy }}<label for="id_policy">Policy</label></div>{{ form.policy.errors }}</div>
+        <div class="col-lg-3"><div class="form-floating">{{ form.endorsement_type }}<label for="id_endorsement_type">Endorsement type</label></div>{{ form.endorsement_type.errors }}</div>
+        <div class="col-lg-3"><div class="form-floating">{{ form.effective_date }}<label for="id_effective_date">Effective date</label></div>{{ form.effective_date.errors }}</div>
       </div>
 
-      <div class="section-title">2. Manual member row <span class="text-secondary fw-normal">optional when uploading a file</span></div>
+      <div class="section-title"><i class="bi bi-person-plus"></i> Manual member row <span class="text-body-secondary fw-normal text-lowercase">optional when files are uploaded</span></div>
       <div class="row g-3 mb-4">
-        <div class="col-md-6"><label class="form-label">Full name</label>{{ form.full_name }}</div>
-        <div class="col-md-3"><label class="form-label">Member no.</label>{{ form.member_no }}</div>
-        <div class="col-md-3"><label class="form-label">Employee no.</label>{{ form.employee_no }}</div>
-        <div class="col-md-4"><label class="form-label">Civil / National ID</label>{{ form.national_id }}</div>
-        <div class="col-md-4"><label class="form-label">Relationship</label>{{ form.relationship }}</div>
-        <div class="col-md-4"><label class="form-label">Date of birth</label>{{ form.date_of_birth }}</div>
-        <div class="col-md-4"><label class="form-label">Gender</label>{{ form.gender }}</div>
-        <div class="col-md-4"><label class="form-label">Plan</label>{{ form.plan }}</div>
-        <div class="col-md-4"><label class="form-label">Annual salary</label>{{ form.annual_salary }}</div>
-        <div class="col-md-4"><label class="form-label">Sum assured</label>{{ form.sum_assured }}</div>
+        <div class="col-md-6"><div class="form-floating">{{ form.full_name }}<label for="id_full_name">Full name</label></div></div>
+        <div class="col-md-3"><div class="form-floating">{{ form.member_no }}<label for="id_member_no">Member no.</label></div></div>
+        <div class="col-md-3"><div class="form-floating">{{ form.employee_no }}<label for="id_employee_no">Employee no.</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.national_id }}<label for="id_national_id">Civil / National ID</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.relationship }}<label for="id_relationship">Relationship</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.date_of_birth }}<label for="id_date_of_birth">Date of birth</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.gender }}<label for="id_gender">Gender</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.plan }}<label for="id_plan">Plan</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.annual_salary }}<label for="id_annual_salary">Annual salary</label></div></div>
+        <div class="col-md-4"><div class="form-floating">{{ form.sum_assured }}<label for="id_sum_assured">Sum assured</label></div></div>
       </div>
 
-      <div class="section-title">3. AI-assisted bulk intake</div>
-      <div class="upload-zone mb-4">
-        <div class="fw-semibold mb-1">Upload Excel, CSV, PDF or images</div>
-        <div class="small text-secondary mb-3">Structured spreadsheets are parsed deterministically. PDFs/images are sent to the active AI provider for field extraction.</div>
+      <div class="section-title"><i class="bi bi-stars"></i> AI-assisted multi-file intake</div>
+      <div class="upload-zone mb-3" :class="{'dragging': dragging}" @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false" @drop.prevent="dragging=false; addFiles($event.dataTransfer.files)" @click.self="$refs.fileInput.click()">
+        <div class="text-center" @click="$refs.fileInput.click()">
+          <div class="upload-icon mb-3"><i class="bi bi-cloud-arrow-up"></i></div>
+          <div class="fw-bold">Drag & drop Excel, PDF or images here</div>
+          <div class="small text-body-secondary mt-1">or click to browse. Multiple files are supported and can be removed before submission.</div>
+          <div class="small text-body-secondary mt-2">Column names do not need to match the template: known aliases are mapped deterministically and the active LLM handles unfamiliar headings.</div>
+        </div>
         {{ form.attachments }}
+        <div class="d-grid gap-2 mt-3" x-show="files.length" x-cloak>
+          <template x-for="(file,index) in files" :key="file.name + file.size">
+            <div class="file-chip"><div class="min-w-0"><i class="bi bi-file-earmark-text me-2 text-primary"></i><span class="file-name" x-text="file.name"></span><small class="text-body-secondary ms-2" x-text="humanSize(file.size)"></small></div><button class="btn btn-sm btn-outline-danger" type="button" @click.stop="removeFile(index)"><i class="bi bi-x-lg"></i></button></div>
+          </template>
+        </div>
         {{ form.attachments.errors }}
       </div>
 
-      <div class="d-flex gap-2 justify-content-end">
-        <a href="{% url 'endorsement_list' %}" class="btn btn-light">Cancel</a>
-        <button class="btn btn-primary px-4">Validate, price & submit</button>
+      <div class="alert alert-info-subtle border d-flex gap-3 align-items-start">
+        <i class="bi bi-shield-lock fs-4 text-primary"></i>
+        <div><strong>Processing gates are enforced before routing.</strong><div class="small mt-1">Expired / near-expiry policies, empty uploads, invalid rows and duplicate rows are blocked. Existing active members are separated and sent for insurer approval rather than straight-through processing.</div></div>
+      </div>
+
+      <div class="d-flex gap-2 justify-content-end mt-4">
+        <a href="{% url 'endorsement_list' %}" class="btn btn-outline-secondary px-4">Cancel</a>
+        <button class="btn btn-primary px-4" type="submit"><span class="btn-label"><i class="bi bi-magic me-2"></i>Validate, price & submit</span><span class="btn-spinner spinner-border spinner-border-sm d-none"></span></button>
       </div>
     </form>
   </div>
-  <div class="col-xl-4">
-    <div class="panel p-4 sticky-xl-top" style="top:24px">
-      <div class="eyebrow text-primary">WHAT HAPPENS NEXT</div>
-      <h3 class="h5">Automated seven-step flow</h3>
-      <ol class="workflow-steps">
-        <li><span>1</span><div><strong>Intake</strong><small>Manual, Excel, PDF or image</small></div></li>
-        <li><span>2</span><div><strong>Extract</strong><small>AI structures unstructured documents</small></div></li>
-        <li><span>3</span><div><strong>Validate</strong><small>Policy rules and mandatory fields</small></div></li>
-        <li><span>4</span><div><strong>Price</strong><small>Deterministic pro-rata engine</small></div></li>
-        <li><span>5</span><div><strong>STP decision</strong><small>Clean cases bypass insurer handling</small></div></li>
-        <li><span>6</span><div><strong>Route</strong><small>Medical to TPA; life to insurer core</small></div></li>
-        <li><span>7</span><div><strong>Track & close</strong><small>SLA, queries, completion notification</small></div></li>
-      </ol>
+  <div class="col-xxl-3 col-xl-4">
+    <div class="panel p-4 sticky-xl-top" style="top:90px">
+      <div class="eyebrow text-primary">AUTOMATED WORKFLOW</div>
+      <h3 class="h5 mt-1">Controlled zero-touch processing</h3>
+      <div class="d-grid gap-3 mt-4">
+        <div class="d-flex gap-3"><span class="badge rounded-pill text-bg-primary align-self-start">1</span><div><strong>Extract everything</strong><div class="small text-body-secondary">Raw source data is retained in JSON; canonical fields are derived separately.</div></div></div>
+        <div class="d-flex gap-3"><span class="badge rounded-pill text-bg-primary align-self-start">2</span><div><strong>Validate policy & rows</strong><div class="small text-body-secondary">Expiry cutoff, backdating, mandatory data, duplicates and existing-member checks.</div></div></div>
+        <div class="d-flex gap-3"><span class="badge rounded-pill text-bg-primary align-self-start">3</span><div><strong>Deterministic pricing</strong><div class="small text-body-secondary">The LLM never decides premium; policy rating rules remain authoritative.</div></div></div>
+        <div class="d-flex gap-3"><span class="badge rounded-pill text-bg-primary align-self-start">4</span><div><strong>Exception approval</strong><div class="small text-body-secondary">Only exceptions such as existing members or TPA amount changes interrupt STP.</div></div></div>
+        <div class="d-flex gap-3"><span class="badge rounded-pill text-bg-primary align-self-start">5</span><div><strong>Route & notify</strong><div class="small text-body-secondary">TPA/core routing, SLA tracking, portal alerts, browser notifications and informative emails.</div></div></div>
+      </div>
     </div>
   </div>
 </div>

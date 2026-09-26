@@ -1,51 +1,44 @@
 {% extends "base.html" %}
 {% block title %}Dashboard | SmartEndorse{% endblock %}
-{% block page_title %}
-{% if org_type == "TPA" %}TPA Operations Dashboard
-{% elif org_type == "INSURER" %}Insurance Operations Dashboard
-{% else %}Client Endorsement Dashboard{% endif %}
-{% endblock %}
+{% block page_title %}{% if org_type == "TPA" %}TPA Operations Dashboard{% elif org_type == "INSURER" %}Insurance Operations Dashboard{% else %}Client Endorsement Dashboard{% endif %}{% endblock %}
 {% block content %}
 <div class="hero-panel mb-4">
   <div>
-    <div class="eyebrow text-primary">ZERO-TOUCH CONTROL TOWER</div>
-    <h2 class="h3 mb-2">Every endorsement, one auditable pipeline.</h2>
-    <p class="mb-0 text-secondary">AI-assisted intake, deterministic validation and pricing, SLA tracking, exception management, and straight-through routing.</p>
+    <div class="eyebrow text-primary"><i class="bi bi-stars me-1"></i> SMART ENDORSEMENT CONTROL TOWER</div>
+    <h2 class="h3 mb-2">One auditable pipeline from upload to endorsement completion.</h2>
+    <p class="mb-0 text-body-secondary">AI-assisted extraction, deterministic policy validation and pricing, exception recovery, approvals, SLA tracking, TPA fulfilment and full audit history.</p>
   </div>
-  <a href="{% url 'endorsement_create' %}" class="btn btn-primary btn-lg">Create endorsement</a>
+  {% if can_create %}<a href="{% url 'endorsement_create' %}" class="btn btn-primary btn-lg"><i class="bi bi-plus-circle me-1"></i> New endorsement</a>{% endif %}
 </div>
 
 <div class="row g-3 mb-4">
-  <div class="col-6 col-xl"><div class="metric-card"><span>Open</span><strong>{{ open_count }}</strong><small>active requests</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span>Completed</span><strong>{{ completed }}</strong><small>closed requests</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span>STP rate</span><strong>{{ stp_rate }}%</strong><small>zero-touch eligible</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card {% if breached %}metric-alert{% endif %}"><span>SLA breached</span><strong>{{ breached }}</strong><small>needs attention</small></div></div>
-  <div class="col-6 col-xl"><div class="metric-card"><span>Premium impact</span><strong>{{ premium|floatformat:3 }}</strong><small>portfolio currency</small></div></div>
+  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-hourglass-split"></i> Open</span><strong>{{ open_count }}</strong><small>active requests</small></div></div>
+  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-check2-circle"></i> Completed</span><strong>{{ completed }}</strong><small>closed requests</small></div></div>
+  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-lightning-charge"></i> STP rate</span><strong>{{ stp_rate }}%</strong><small>zero-touch eligible</small></div></div>
+  <div class="col-6 col-xl"><div class="metric-card {% if breached %}metric-alert{% endif %}"><span><i class="bi bi-alarm"></i> SLA breached</span><strong>{{ breached }}</strong><small>needs attention</small></div></div>
+  <div class="col-6 col-xl"><div class="metric-card"><span><i class="bi bi-cash-stack"></i> Premium impact</span><strong>{{ premium|floatformat:3 }}</strong><small>portfolio currency</small></div></div>
 </div>
 
 <div class="row g-3 mb-4">
-  <div class="col-lg-8">
-    <div class="panel h-100">{{ chart_status|safe }}</div>
-  </div>
+  <div class="col-lg-8"><div class="panel h-100 chart-panel">{{ chart_status|safe }}</div></div>
   <div class="col-lg-4">
     <div class="panel h-100 p-4">
-      <h3 class="h6">Operating snapshot</h3>
+      <div class="section-title"><i class="bi bi-speedometer2"></i> Operating snapshot</div>
       <div class="snapshot-row"><span>Accessible policies</span><strong>{{ policy_count }}</strong></div>
       <div class="snapshot-row"><span>TPA queue</span><strong>{{ tpa_queue }}</strong></div>
       <div class="snapshot-row"><span>Exceptions</span><strong>{{ exceptions }}</strong></div>
       <div class="snapshot-row"><span>Total requests</span><strong>{{ total }}</strong></div>
-      <hr>
-      <p class="small text-secondary mb-0">STP cases are automatically validated and dispatched. Exceptions remain visible without blocking clean cases.</p>
+      <div class="alert alert-primary-subtle border-0 small mt-3 mb-0"><i class="bi bi-shield-check me-1"></i> Cases with validation errors, existing-member conflicts or pending financial approvals cannot move to completion.</div>
     </div>
   </div>
 </div>
 
-<div class="panel mb-4">{{ chart_trend|safe }}</div>
+<div class="panel mb-4 chart-panel">{{ chart_trend|safe }}</div>
 
 <div class="panel">
   <div class="panel-heading">
-    <div><h3 class="h6 mb-1">Recent endorsements</h3><p class="small text-secondary mb-0">Latest activity across policies you can access.</p></div>
-    <a href="{% url 'endorsement_list' %}" class="btn btn-sm btn-outline-primary">View all</a>
+    <div><h3 class="h6 mb-1">Recent endorsements</h3><p class="small text-body-secondary mb-0">Latest activity across policies you can access.</p></div>
+    <a href="{% url 'endorsement_list' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-list-ul me-1"></i>View all</a>
   </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
@@ -53,16 +46,14 @@
       <tbody>
       {% for item in recent %}
       <tr>
-        <td><a href="{% url 'endorsement_detail' item.pk %}" class="fw-semibold text-decoration-none">{{ item.reference }}</a></td>
-        <td>{{ item.policy.policy_number }}<div class="small text-secondary">{{ item.policy.client.name }}</div></td>
+        <td><a href="{% url 'endorsement_detail' item.pk %}" class="fw-semibold text-decoration-none">{{ item.reference }}</a><div class="small text-body-secondary">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+        <td>{{ item.policy.policy_number }}<div class="small text-body-secondary">{{ item.policy.client.name }}</div></td>
         <td>{{ item.get_endorsement_type_display }}</td>
         <td><span class="status-pill status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-        <td>{% if item.sla_breached %}<span class="text-danger fw-semibold">Breached</span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M H:i" }}{% else %}—{% endif %}</td>
+        <td>{% if item.sla_breached %}<span class="text-danger fw-semibold"><i class="bi bi-exclamation-octagon me-1"></i>Breached</span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M H:i" }}{% else %}—{% endif %}</td>
         <td class="text-end">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
       </tr>
-      {% empty %}
-      <tr><td colspan="6" class="text-center py-5 text-secondary">No endorsement requests yet.</td></tr>
-      {% endfor %}
+      {% empty %}<tr><td colspan="6" class="text-center py-5 text-body-secondary">No endorsement requests yet.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
