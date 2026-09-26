@@ -1488,8 +1488,12 @@ class WorkflowService:
             cls.transition(request_obj, EndorsementRequest.Status.CORE_DISPATCHED, actor, "Insurer operations/core posting started.")
 
     @classmethod
-    def update_tpa_item(cls, item, actor, card_number=None, effective_date=None, amount=None, action="save", comment=""):
+    def update_tpa_item(cls, item, actor, card_number=None, amount=None, effective_date=None, action=None, comment=""):
         request_obj = item.request
+        legacy_call = action is None
+        action = action or "approve"
+        if legacy_call and effective_date is None:
+            effective_date = item.tpa_effective_date or item.effective_date or request_obj.effective_date
         if request_obj.policy.product != Policy.Product.GROUP_MEDICAL:
             raise ValueError("TPA processing applies only to Group Medical endorsements.")
 
