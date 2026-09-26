@@ -38,6 +38,24 @@ class BaseInsuranceTest(TestCase):
         PlatformConfiguration.objects.create(name="Default", endorsement_expiry_cutoff_days=30)
 
 
+class PortalFrontendStyleTests(BaseInsuranceTest):
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_authenticated_portal_uses_django_admin_visual_assets(self):
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get("/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("/static/admin/css/base.css", html)
+        self.assertIn("/static/admin/css/forms.css", html)
+        self.assertNotIn("admin-lte", html.lower())
+        self.assertNotIn("bootswatch", html.lower())
+        self.assertIn("SmartEndorse", html)
+
+
 class PricingEngineTests(BaseInsuranceTest):
     def test_daily_prorata_addition(self):
         fixed_policy = Policy.objects.create(

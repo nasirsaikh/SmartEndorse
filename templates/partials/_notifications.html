@@ -1,13 +1,21 @@
-<div class="notification-head d-flex align-items-center justify-content-between px-3 py-3 border-bottom">
-  <div><strong>Notifications</strong><div class="small text-body-secondary">{{ unread_notifications }} unread</div></div>
-  {% if unread_notifications %}<button class="btn btn-sm btn-outline-secondary" hx-post="{% url 'notifications_read' %}" hx-swap="none" hx-on::after-request="htmx.trigger('#notification-panel','refresh')">Mark all read</button>{% endif %}
+<div class="notification-head">
+  <div><strong>Notifications</strong><small>{{ unread_notifications }} unread</small></div>
+  {% if unread_notifications %}
+  <button class="button" hx-post="{% url 'notifications_read' %}" hx-swap="none" hx-on::after-request="htmx.trigger('#notification-panel','refresh')">Mark all read</button>
+  {% endif %}
 </div>
-<div class="notification-list">
+<div>
 {% for note in notifications %}
-  <a href="{{ note.link|default:'#' }}" class="notification-item d-block text-decoration-none px-3 py-3 border-bottom {% if not note.is_read %}notification-unread{% endif %}" data-notification-id="{{ note.pk }}" data-notification-title="{{ note.title|escape }}" data-notification-message="{{ note.message|escape }}">
-    <div class="d-flex gap-2"><span class="notification-dot level-{{ note.level|lower }}"></span><div class="min-w-0"><div class="fw-semibold text-body text-truncate">{{ note.title }}</div><div class="small text-body-secondary notification-message">{{ note.message }}</div><div class="small text-body-tertiary mt-1">{{ note.created_at|timesince }} ago</div></div></div>
+  <a href="{{ note.link|default:'#' }}"
+     class="notification-item {% if not note.is_read %}notification-unread{% endif %}"
+     data-notification-id="{{ note.pk }}"
+     data-notification-title="{{ note.title|escape }}"
+     data-notification-message="{{ note.message|escape }}">
+    <div class="notification-title">{{ note.title }}</div>
+    <div class="notification-message">{{ note.message }}</div>
+    <div class="notification-time">{{ note.created_at|timesince }} ago</div>
   </a>
 {% empty %}
-  <div class="p-4 text-center text-body-secondary"><i class="bi bi-bell-slash fs-3 d-block mb-2"></i>No notifications</div>
+  <div class="notification-empty">No notifications.</div>
 {% endfor %}
 </div>

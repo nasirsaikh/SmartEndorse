@@ -31,12 +31,15 @@ class MultiFileField(forms.FileField):
 class StyledFormMixin:
     def apply_bootstrap(self):
         for field in self.fields.values():
+            existing = field.widget.attrs.get("class", "")
+            classes = [x for x in existing.split() if x not in {"form-control", "form-select", "form-check-input"}]
             if isinstance(field.widget, forms.Select):
-                field.widget.attrs["class"] = "form-select searchable-select"
+                classes.append("searchable-select")
             elif isinstance(field.widget, forms.CheckboxInput):
-                field.widget.attrs["class"] = "form-check-input"
+                classes.append("portal-checkbox")
             elif not isinstance(field.widget, forms.FileInput):
-                field.widget.attrs["class"] = "form-control"
+                classes.append("vTextField")
+            field.widget.attrs["class"] = " ".join(dict.fromkeys(classes))
 
 
 class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
@@ -52,7 +55,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
     sum_assured = forms.DecimalField(required=False, max_digits=14, decimal_places=3)
     attachments = MultiFileField(required=False, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
-        "class": "d-none",
+        "class": "portal-file-input",
         "x-ref": "fileInput",
         "@change": "addFiles($event.target.files)",
         "multiple": True,
@@ -101,7 +104,7 @@ class EndorsementCreateForm(StyledFormMixin, forms.ModelForm):
 class BulkRecoveryForm(forms.Form):
     attachments = MultiFileField(required=True, widget=MultiFileInput(attrs={
         "accept": ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp",
-        "class": "d-none", "multiple": True,
+        "class": "portal-file-input", "multiple": True,
     }))
 
 
