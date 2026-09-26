@@ -81,7 +81,17 @@ def can_edit_request(user, request_obj):
         return False
     if p.organization_id == request_obj.requester_organization_id and p.role not in {UserProfile.Role.CLIENT_VIEWER, UserProfile.Role.AUDITOR}:
         return request_obj.status in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.TPA_QUERY, EndorsementRequest.Status.REJECTED}
-    return p.organization_id == request_obj.policy.insurer_id and p.role in INSURER_OPERATION_ROLES
+    return bool(
+        p.organization_id == request_obj.policy.insurer_id
+        and p.role in INSURER_OPERATION_ROLES
+        and request_obj.status in {
+            EndorsementRequest.Status.DRAFT,
+            EndorsementRequest.Status.NEEDS_INFO,
+            EndorsementRequest.Status.PENDING_INSURER_APPROVAL,
+            EndorsementRequest.Status.TPA_QUERY,
+            EndorsementRequest.Status.REJECTED,
+        }
+    )
 
 
 def can_tpa_process(user, request_obj):
