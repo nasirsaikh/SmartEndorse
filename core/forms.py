@@ -184,7 +184,7 @@ class EndorsementItemCorrectionForm(StyledFormMixin, forms.ModelForm):
         model = EndorsementItem
         fields = (
             "member_no", "employee_no", "national_id", "full_name", "relationship",
-            "date_of_birth", "gender", "plan", "sum_assured", "effective_date",
+            "date_of_birth", "gender", "plan", "annual_salary", "sum_assured", "effective_date",
         )
         widgets = {
             "date_of_birth": forms.DateInput(attrs={"type": "date"}),
