@@ -1,64 +1,141 @@
 {% extends "base.html" %}
-{% block title %}Dashboard | SmartEndorse{% endblock %}
-{% block page_title %}{% if org_type == "TPA" %}TPA operations{% elif org_type == "INSURER" %}Insurance operations{% else %}Client endorsement dashboard{% endif %}{% endblock %}
+{% block title %}Operations | SmartEndorse{% endblock %}
+{% block page_kicker %}SmartEndorse / Command / Live overview{% endblock %}
+{% block page_title %}ENDORSEMENT CONTROL{% endblock %}
 {% block object_tools %}
-<ul class="portal-object-tools">
-  {% if can_create %}<li><a class="addlink" href="{% url 'endorsement_create' %}">Add endorsement</a></li>{% endif %}
-</ul>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-outline badge-success gap-2 font-mono text-[10px]"><span class="status status-success"></span>LIVE TELEMETRY</span>
+    {% if can_create %}<a href="{% url 'endorsement_create' %}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i>NEW ENDORSEMENT</a>{% endif %}
+  </div>
 {% endblock %}
 {% block content %}
-<div class="portal-kpis">
-  <div class="portal-kpi"><span class="label">Open requests</span><strong>{{ open_count }}</strong><small>Active workflow items</small></div>
-  <div class="portal-kpi"><span class="label">Completed</span><strong>{{ completed }}</strong><small>Closed requests</small></div>
-  <div class="portal-kpi"><span class="label">STP rate</span><strong>{{ stp_rate }}%</strong><small>Zero-touch eligible</small></div>
-  <div class="portal-kpi {% if breached %}alert{% endif %}"><span class="label">SLA breached</span><strong>{{ breached }}</strong><small>Needs attention</small></div>
-  <div class="portal-kpi"><span class="label">Premium impact</span><strong>{{ premium|floatformat:3 }}</strong><small>Portfolio currency</small></div>
+
+{% if exceptions %}
+<div role="alert" class="mb-4 flex flex-col gap-3 border border-warning/40 bg-warning/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+  <div class="flex items-start gap-3">
+    <i class="bi bi-exclamation-triangle-fill mt-0.5 text-warning"></i>
+    <div><strong>{{ exceptions }} workflow exception{{ exceptions|pluralize }} require attention</strong><div class="mt-0.5 text-xs opacity-60">Needs-information, approval and failed cases are held out of straight-through processing.</div></div>
+  </div>
+  <a href="{% url 'endorsement_list' %}?status=NEEDS_INFO" class="btn btn-warning btn-xs">OPEN EXCEPTIONS</a>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-2 gap-px bg-base-content/10 lg:grid-cols-5">
+  <div class="se-kpi">
+    <div class="flex items-center justify-between"><span class="se-kpi-label">Open pipeline</span><i class="bi bi-diagram-3 text-primary"></i></div>
+    <div class="se-kpi-value mt-3">{{ open_count }}</div>
+    <div class="se-kpi-delta">active requests</div>
+  </div>
+  <div class="se-kpi">
+    <div class="flex items-center justify-between"><span class="se-kpi-label">Completed</span><i class="bi bi-check2-circle text-success"></i></div>
+    <div class="se-kpi-value mt-3">{{ completed }}</div>
+    <div class="se-kpi-delta">{{ completion_rate }}% completion share</div>
+  </div>
+  <div class="se-kpi">
+    <div class="flex items-center justify-between"><span class="se-kpi-label">STP rate</span><i class="bi bi-lightning-charge text-success"></i></div>
+    <div class="se-kpi-value mt-3 text-success">{{ stp_rate }}%</div>
+    <div class="se-kpi-delta">zero-touch eligible</div>
+  </div>
+  <div class="se-kpi">
+    <div class="flex items-center justify-between"><span class="se-kpi-label">SLA breached</span><i class="bi bi-activity text-error"></i></div>
+    <div class="se-kpi-value mt-3 {% if breached %}text-error{% endif %}">{{ breached }}</div>
+    <div class="se-kpi-delta">active breaches</div>
+  </div>
+  <div class="se-kpi col-span-2 lg:col-span-1">
+    <div class="flex items-center justify-between"><span class="se-kpi-label">Premium impact</span><i class="bi bi-cash-stack text-primary"></i></div>
+    <div class="se-kpi-value mt-3">{{ premium|floatformat:3 }}</div>
+    <div class="se-kpi-delta">portfolio total</div>
+  </div>
 </div>
 
-<div class="portal-dashboard-grid">
-  <section class="module chart-module">
-    <h2>Requests by status</h2>
-    <div class="module-content">{{ chart_status|safe }}</div>
-  </section>
-
-  <section class="module">
-    <h2>Operating snapshot</h2>
-    <div class="module-content">
-      <div class="snapshot-list">
-        <div class="snapshot-row"><span>Accessible policies</span><strong>{{ policy_count }}</strong></div>
-        <div class="snapshot-row"><span>TPA queue</span><strong>{{ tpa_queue }}</strong></div>
-        <div class="snapshot-row"><span>Exceptions</span><strong>{{ exceptions }}</strong></div>
-        <div class="snapshot-row"><span>Total requests</span><strong>{{ total }}</strong></div>
+<div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,2.2fr)_minmax(300px,.9fr)]">
+  <div class="space-y-4">
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">Service matrix</div><div class="se-panel-title mt-1">PIPELINE BY STATUS</div></div>
+        <div class="badge badge-ghost badge-sm font-mono text-[10px]">{{ total }} TOTAL</div>
       </div>
-      <p class="help">
-        Requests with validation errors, existing-member conflicts or pending approvals remain blocked until the exception is resolved.
-      </p>
-    </div>
-  </section>
+      <div class="p-2 sm:p-3">{{ chart_status|safe }}</div>
+    </section>
+
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">Telemetry / six months</div><div class="se-panel-title mt-1">REQUEST VELOCITY</div></div>
+        <div class="join"><span class="join-item btn btn-ghost btn-xs">6M</span><span class="join-item btn btn-ghost btn-xs btn-active">LIVE</span></div>
+      </div>
+      <div class="p-2 sm:p-3">{{ chart_trend|safe }}</div>
+    </section>
+  </div>
+
+  <div class="space-y-4">
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">Active incidents</div><div class="se-panel-title mt-1">WATCH DESK</div></div>
+        <span class="badge {% if exceptions %}badge-warning{% else %}badge-success{% endif %} badge-sm">{{ exceptions }} OPEN</span>
+      </div>
+      <div class="px-4">
+        <div class="se-watch-item flex items-center justify-between gap-4">
+          <div><div class="text-xs font-semibold">Validation / approval exceptions</div><div class="text-[10px] opacity-50">Blocked from automated routing</div></div>
+          <strong class="font-mono {% if exceptions %}text-warning{% endif %}">{{ exceptions }}</strong>
+        </div>
+        <div class="se-watch-item flex items-center justify-between gap-4">
+          <div><div class="text-xs font-semibold">TPA work queue</div><div class="text-[10px] opacity-50">Sent, processing or queried</div></div>
+          <strong class="font-mono text-info">{{ tpa_queue }}</strong>
+        </div>
+        <div class="se-watch-item flex items-center justify-between gap-4">
+          <div><div class="text-xs font-semibold">SLA breaches</div><div class="text-[10px] opacity-50">Requires operational action</div></div>
+          <strong class="font-mono {% if breached %}text-error{% endif %}">{{ breached }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="se-panel">
+      <div class="se-panel-head">
+        <div><div class="se-eyebrow">Capacity array</div><div class="se-panel-title mt-1">OPERATIONAL LOAD</div></div>
+        <i class="bi bi-speedometer2 text-primary"></i>
+      </div>
+      <div class="space-y-5 p-4">
+        <div>
+          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>Completed</span><span class="font-mono">{{ completion_rate }}%</span></div>
+          <progress class="progress progress-success w-full" value="{{ completion_rate }}" max="100"></progress>
+        </div>
+        <div>
+          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>TPA queue</span><span class="font-mono">{{ tpa_queue_rate }}%</span></div>
+          <progress class="progress progress-info w-full" value="{{ tpa_queue_rate }}" max="100"></progress>
+        </div>
+        <div>
+          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>Exceptions</span><span class="font-mono">{{ exception_rate }}%</span></div>
+          <progress class="progress progress-warning w-full" value="{{ exception_rate }}" max="100"></progress>
+        </div>
+        <div class="grid grid-cols-3 divide-x divide-base-content/10 border-t border-base-content/10 pt-4 text-center">
+          <div><div class="font-mono text-lg font-semibold text-primary">{{ policy_count }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">Policies</div></div>
+          <div><div class="font-mono text-lg font-semibold text-info">{{ tpa_queue }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">TPA queue</div></div>
+          <div><div class="font-mono text-lg font-semibold text-warning">{{ exceptions }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">Exceptions</div></div>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
 
-<section class="module chart-module">
-  <h2>Endorsement trend</h2>
-  <div class="module-content">{{ chart_trend|safe }}</div>
-</section>
-
-<section class="module">
-  <h2>Recent endorsements</h2>
-  <p class="module-description">Latest activity across policies you are permitted to access.</p>
-  <div class="portal-table-wrap">
-    <table class="portal-table">
-      <thead><tr><th>Reference</th><th>Policy</th><th>Type</th><th>Status</th><th>SLA</th><th class="numeric">Premium impact</th></tr></thead>
+<section class="se-panel mt-4">
+  <div class="se-panel-head">
+    <div><div class="se-eyebrow">Live workflow feed</div><div class="se-panel-title mt-1">RECENT ENDORSEMENTS</div></div>
+    <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-xs">VIEW ALL <i class="bi bi-arrow-right"></i></a>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="se-table">
+      <thead><tr><th>Reference</th><th>Policy / client</th><th>Request</th><th>Status</th><th>SLA</th><th class="num">Premium impact</th></tr></thead>
       <tbody>
       {% for item in recent %}
       <tr>
-        <td><a href="{% url 'endorsement_detail' item.pk %}"><strong>{{ item.reference }}</strong></a><div class="muted">{{ item.created_at|date:"d M Y H:i" }}</div></td>
-        <td>{{ item.policy.policy_number }}<div class="muted">{{ item.policy.client.name }}</div></td>
+        <td class="mono"><a href="{% url 'endorsement_detail' item.pk %}" class="link link-primary font-semibold no-underline">{{ item.reference }}</a><div class="mt-1 text-[10px] opacity-45">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+        <td><strong class="text-xs">{{ item.policy.policy_number }}</strong><div class="text-[10px] opacity-50">{{ item.policy.client.name }}</div></td>
         <td>{{ item.get_endorsement_type_display }}</td>
-        <td><span class="status-label status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-        <td>{% if item.sla_breached %}<span class="text-danger"><strong>Breached</strong></span>{% elif item.current_sla_due_at %}{{ item.current_sla_due_at|date:"d M H:i" }}{% else %}—{% endif %}</td>
-        <td class="numeric">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
+        <td><span class="se-status se-status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
+        <td>{% if item.sla_breached %}<span class="font-semibold text-error">BREACHED</span>{% elif item.current_sla_due_at %}<span class="font-mono text-xs">{{ item.current_sla_due_at|date:"d M H:i" }}</span>{% else %}—{% endif %}</td>
+        <td class="num mono">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
       </tr>
-      {% empty %}<tr><td colspan="6" class="empty-state">No endorsement requests yet.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="6" class="py-12 text-center opacity-50">No endorsement traffic yet.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
