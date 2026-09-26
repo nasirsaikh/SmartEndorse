@@ -1,0 +1,31 @@
+<section class="se-panel">
+  <div class="se-panel-head">
+    <div>
+      <div class="se-eyebrow">Original extraction</div>
+      <div class="se-panel-title mt-1">UNIFIED SOURCE JSON</div>
+    </div>
+    <span class="badge badge-ghost badge-sm">{{ source_json_rows|length }} SOURCE ROW{{ source_json_rows|length|pluralize|upper }}</span>
+  </div>
+  <div class="p-4">
+    <div class="mb-3 text-[11px] leading-5 opacity-60">
+      Canonical source fields are shown once per member. Raw/normalized duplicates are collapsed into one unified JSON view.
+    </div>
+    <div class="join join-vertical w-full">
+      {% for row in source_json_rows %}
+      <div class="collapse collapse-arrow join-item border border-base-content/10 bg-base-100" {% if forloop.first %}open{% endif %}>
+        <input type="checkbox" {% if forloop.first %}checked{% endif %}>
+        <div class="collapse-title flex items-center gap-3 py-3 text-xs">
+          <span class="badge badge-primary badge-outline badge-sm">ITEM {{ row.item.pk }}</span>
+          <strong>{{ row.item.full_name|default:row.item.member_no|default:row.item.employee_no|default:"Unidentified member" }}</strong>
+          {% if row.source_attachment_id %}<span class="font-mono text-[9px] opacity-45">SOURCE #{{ row.source_attachment_id }}</span>{% endif %}
+        </div>
+        <div class="collapse-content">
+          <pre class="se-json">{{ row.json }}</pre>
+        </div>
+      </div>
+      {% empty %}
+      <div class="rounded-box border border-dashed border-base-content/20 p-6 text-center text-xs opacity-50">No stored source JSON is available for this endorsement.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
