@@ -211,6 +211,11 @@ class PolicyPlan(TimeStampedModel):
     code = models.CharField(max_length=40)
     name = models.CharField(max_length=120)
     annual_rate = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal("0.000"), validators=[MinValueValidator(Decimal("0"))])
+    sum_assured = models.DecimalField(
+        max_digits=14, decimal_places=3, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Optional plan-level sum assured. When configured, endorsement member sum assured is derived from the selected plan.",
+    )
     relationship_rates = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
 
