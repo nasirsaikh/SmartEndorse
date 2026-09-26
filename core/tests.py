@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from .access import accessible_policies, can_decide_approval
 from .ai import AIService
@@ -564,6 +564,51 @@ class AIExtractionTrainingTests(BaseInsuranceTest):
         self.assertFalse(ai.config.supports_vision)
         ai._require_provider(vision=True)
         self.assertEqual(ai.config, vision_provider)
+
+    @patch("core.ai.httpx.Client.post")
+    def test_ollama_404_surfaces_model_not_found_detail(self, post_mock):
+        provider = AIProviderConfig.objects.create(
+            name="Vision OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5vl:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        response = Mock()
+        response.is_error = True
+        response.status_code = 404
+        response.json.return_value = {"error": "model 'qwen2.5vl:7b' not found"}
+        response.text = '{"error":"model not found"}'
+        post_mock.return_value = response
+
+        ai = AIService(config=provider)
+        with self.assertRaisesMessage(RuntimeError, "model 'qwen2.5vl:7b' not found"):
+            ai._post_json("http://127.0.0.1:11434/api/chat", {"model": provider.model_name})
+
+    @patch("core.ai.httpx.Client.post")
+    def test_ollama_404_without_body_gives_install_and_version_hint(self, post_mock):
+        provider = AIProviderConfig.objects.create(
+            name="Vision OCR",
+            provider=AIProviderConfig.Provider.OLLAMA,
+            model_name="qwen2.5vl:7b",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+            supports_vision=True,
+        )
+        response = Mock()
+        response.is_error = True
+        response.status_code = 404
+        response.json.side_effect = ValueError("no json")
+        response.text = ""
+        post_mock.return_value = response
+
+        ai = AIService(config=provider)
+        with self.assertRaises(RuntimeError) as exc:
+            ai._post_json("http://127.0.0.1:11434/api/chat", {"model": provider.model_name})
+        message = str(exc.exception)
+        self.assertIn("ollama pull qwen2.5vl:7b", message)
+        self.assertIn("Ollama 0.7.0 or newer", message)
 
     def test_seeded_admin_training_profiles_exist(self):
         self.assertTrue(
