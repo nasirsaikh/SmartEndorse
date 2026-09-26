@@ -1,6 +1,7 @@
 import base64
 import json
 import mimetypes
+import re
 from pathlib import Path
 
 import httpx
@@ -71,6 +72,20 @@ DEFAULT_STRUCTURED_INSTRUCTIONS = (
     "Normalize spreadsheet or CSV source rows into the canonical member fields. "
     "Map synonymous headers without inventing values. Preserve the original source object in _source_raw."
 )
+
+FORM_FIELD_ALIASES = {
+    "member_no": ["Member No", "Member Number", "Member ID", "Membership No", "Card No"],
+    "employee_no": ["Employee No", "Employee Number", "Employee ID", "Emp No", "Emp ID", "Staff No", "Staff ID"],
+    "national_id": ["Civil ID", "Civil Number", "National ID", "Resident ID", "ID No", "Identification No"],
+    "full_name": ["Member Name", "Insured Name", "Employee Name", "Full Name", "Name"],
+    "relationship": ["Relationship", "Relation", "Dependent Type"],
+    "date_of_birth": ["Date of Birth", "DOB", "Birth Date"],
+    "gender": ["Gender", "Sex"],
+    "plan_code": ["Plan Code", "Benefit Plan", "Medical Class", "Benefit Class", "Category", "Class", "Plan"],
+    "sum_assured": ["Sum Assured", "Sum Insured", "Coverage Amount"],
+    "effective_date": ["Effective Date", "Addition Date", "Deletion Date", "Endorsement Date"],
+}
+
 
 
 class AIService:
@@ -170,6 +185,171 @@ class AIService:
         serializable = json.dumps(rows[:500], default=str, ensure_ascii=False)
         prompt += "\n\nSOURCE ROWS:\n" + serializable
         return self._parse_json_array(self._chat(prompt, system, response_schema=MEMBER_OUTPUT_SCHEMA))
+
+    def _form_aliases(self):
+        aliases = {key: list(values) for key, values in FORM_FIELD_ALIASES.items()}
+        profile = self._profile(AIExtractionProfile.Task.DOCUMENT_EXTRACTION)
+        if profile and isinstance(profile.field_aliases, dict):
+            for key, values in profile.field_aliases.items():
+                if key not in aliases:
+                    continue
+                if isinstance(values, str):
+                    values = [values]
+                if isinstance(values, list):
+                    configured = [str(value).strip() for value in values if str(value).strip()]
+                    aliases[key] = configured + [value for value in aliases[key] if value not in configured]
+        return aliases
+
+    @staticmethod
+    def _clean_ocr_value(value):
+        value = str(value or "").strip().strip("|").strip()
+        value = re.sub(r"^[\-–—:;=]+\s*", "", value)
+        value = re.sub(r"\s+", " ", value)
+        return value.strip(" \t|;,")
+
+    def _find_labeled_value(self, text, aliases, all_aliases):
+        lines = [line.strip() for line in str(text or "").replace("\r", "\n").split("\n")]
+        lines = [line for line in lines if line]
+        next_label_pattern = "|".join(
+            re.escape(alias)
+            for alias in sorted(all_aliases, key=len, reverse=True)
+            if alias
+        )
+
+        for alias in aliases:
+            escaped = re.escape(alias)
+            inline = re.compile(
+                rf"(?i)(?:^|[|;])\s*{escaped}\s*(?::|=|\-|–|—|\|)\s*(.+)$"
+            )
+            loose = re.compile(rf"(?i)^\s*{escaped}\s{{2,}}(.+)$")
+            label_only = re.compile(rf"(?i)^\s*{escaped}\s*[:=\-–—|]?\s*$")
+
+            for index, line in enumerate(lines):
+                match = inline.search(line) or loose.search(line)
+                if match:
+                    value = match.group(1)
+                    if next_label_pattern:
+                        value = re.split(
+                            rf"(?i)\s+(?={next_label_pattern}\s*(?::|=|\-|–|—|\|))",
+                            value,
+                            maxsplit=1,
+                        )[0]
+                    value = self._clean_ocr_value(value)
+                    if value:
+                        return value
+
+                if label_only.match(line) and index + 1 < len(lines):
+                    value = self._clean_ocr_value(lines[index + 1])
+                    if value and not any(
+                        re.match(rf"(?i)^\s*{re.escape(other)}\s*[:=\-–—|]?", value)
+                        for other in all_aliases
+                    ):
+                        return value
+
+            match = re.search(
+                rf"(?i)\b{escaped}\b\s*(?::|=|\-|–|—)\s*([^\n|;]+)",
+                text,
+            )
+            if match:
+                value = self._clean_ocr_value(match.group(1))
+                if value:
+                    return value
+        return None
+
+    def _resolve_form_plan(self, value, text):
+        valid_plans = self.context.get("valid_plans") if isinstance(self.context, dict) else []
+        if not isinstance(valid_plans, list) or not valid_plans:
+            return value
+
+        candidate = self._clean_ocr_value(value).lower() if value else ""
+        for plan in valid_plans:
+            code = str(plan.get("code") or "").strip()
+            name = str(plan.get("name") or "").strip()
+            values = [part for part in (code, name) if part]
+            for part in values:
+                normalized = part.lower()
+                if candidate and (
+                    candidate == normalized
+                    or normalized in candidate
+                    or candidate in normalized
+                ):
+                    return code or name
+
+        source = str(text or "").lower()
+        candidates = []
+        for plan in valid_plans:
+            code = str(plan.get("code") or "").strip()
+            name = str(plan.get("name") or "").strip()
+            if code:
+                candidates.append((len(code), code, code))
+            if name:
+                candidates.append((len(name), name, code or name))
+        for _, token, resolved in sorted(candidates, reverse=True):
+            if re.search(rf"(?<![\w]){re.escape(token.lower())}(?![\w])", source):
+                return resolved
+        return value
+
+    def extract_form_fields_from_text(self, text):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("OCR returned no readable text.")
+
+        aliases = self._form_aliases()
+        all_aliases = [alias for values in aliases.values() for alias in values]
+        row = {key: None for key in CANONICAL_FIELDS}
+
+        for field, field_aliases in aliases.items():
+            row[field] = self._find_labeled_value(text, field_aliases, all_aliases)
+
+        row["plan_code"] = self._resolve_form_plan(row.get("plan_code"), text)
+        row["_source_raw"] = {
+            "ocr_text": text[:12000],
+            "extraction_mode": "direct_form_fill",
+        }
+
+        meaningful = {
+            key: value
+            for key, value in row.items()
+            if key != "_source_raw" and value not in (None, "")
+        }
+        if not meaningful:
+            raise ValueError(
+                "OCR completed, but SmartEndorse could not find any recognizable member fields in the document."
+            )
+        return row
+
+    def extract_form_fields_from_image_bytes(self, content, mime="image/png"):
+        self._require_provider(vision=True)
+        encoded = base64.b64encode(content).decode("ascii")
+
+        try:
+            if (
+                self.config.provider == AIProviderConfig.Provider.OLLAMA
+                and "glm-ocr" in (self.config.model_name or "").lower()
+            ):
+                ocr_text = self._vision_ocr_text(encoded, mime)
+                return self.extract_form_fields_from_text(ocr_text)
+
+            rows = self.extract_image_bytes(content, mime)
+            if not rows:
+                raise ValueError("Vision model returned no member data.")
+            return rows[0]
+        except RuntimeError as exc:
+            if self._is_glm_ollama_repeat_error(exc):
+                fallback_config = self._select_vision_provider(
+                    exclude_pk=self.config.pk,
+                    exclude_glm_ocr=True,
+                )
+                if fallback_config:
+                    fallback = AIService(
+                        config=fallback_config,
+                        product=self.product,
+                        context=self.context,
+                    )
+                    rows = fallback.extract_image_bytes(content, mime)
+                    if rows:
+                        return rows[0]
+            raise
 
     def extract_image_rows(self, path):
         path = Path(path)
