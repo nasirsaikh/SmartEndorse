@@ -50,11 +50,17 @@ class AIProviderConfigAdmin(admin.ModelAdmin):
     list_display = ("name", "provider", "model_name", "is_active", "supports_vision", "updated_at")
     list_filter = ("provider", "is_active", "supports_vision")
     search_fields = ("name", "model_name")
-
-    def save_model(self, request, obj, form, change):
-        if obj.is_active:
-            AIProviderConfig.objects.exclude(pk=obj.pk).update(is_active=False)
-        super().save_model(request, obj, form, change)
+    fieldsets = (
+        ("Provider", {"fields": ("name", "provider", "model_name", "base_url", "api_key")}),
+        ("Capabilities", {
+            "fields": ("is_active", "supports_vision"),
+            "description": (
+                "Multiple providers may be active. SmartEndorse uses a non-vision provider for normal text tasks "
+                "when available, and automatically selects an active Supports vision provider for image/scanned-PDF OCR."
+            ),
+        }),
+        ("Runtime", {"fields": ("temperature", "timeout_seconds", "options")}),
+    )
 
 
 class AITrainingExampleInline(admin.StackedInline):
