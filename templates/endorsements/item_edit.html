@@ -68,19 +68,19 @@
         {% csrf_token %}
         <input type="hidden" name="action" value="ocr_fill">
         <div class="se-dropzone min-h-[12rem]">
-          {{ ocr_form.ocr_file }}
+          {{ ocr_form.ocr_files }}
           <div class="w-full text-center">
             <div class="se-dropzone-icon"><i class="bi bi-stars"></i></div>
-            <strong class="font-mono text-xs tracking-wider">DROP IMAGE OR PDF</strong>
-            <div class="mt-2 text-[10px] leading-4 opacity-55">SmartEndorse extracts member details into the correction form. Review the values before saving.</div>
-            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">CHOOSE FILE</button>
+            <strong class="font-mono text-xs tracking-wider">DROP FRONT / BACK / PDF EVIDENCE</strong>
+            <div class="mt-2 text-[10px] leading-4 opacity-55">Upload one or more files for the same member. Front and back ID images may be separate files; SmartEndorse combines the evidence before filling the form.</div>
+            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">CHOOSE FILES</button>
             <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No file selected</div>
           </div>
           <div class="se-file-list w-full"></div>
         </div>
-        {{ ocr_form.ocr_file.errors }}
+        {{ ocr_form.ocr_files.errors }}
         <button class="btn btn-primary btn-sm mt-3 w-full" type="submit">
-          <span class="btn-label"><i class="bi bi-magic"></i>EXTRACT & FILL FORM</span>
+          <span class="btn-label"><i class="bi bi-magic"></i>COMBINE EVIDENCE & FILL FORM</span>
           <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
         </button>
       </form>
