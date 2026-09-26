@@ -740,7 +740,7 @@ def request_detail(request, pk):
         item.source_json = source_json_by_item.get(item.pk, "{}")
 
     return render(request, "endorsements/detail.html", {
-        "endorsement": endorsement, "query_form": QueryForm(), "response_form": QueryResponseForm(),
+        "endorsement": endorsement, "items": items, "query_form": QueryForm(), "response_form": QueryResponseForm(),
         "supplemental_form": SupplementalUploadForm(), "bulk_recovery_form": BulkRecoveryForm(),
         "approval_form": ApprovalDecisionForm(),
         "item_kpis": item_kpis, "wizard_steps": wizard_steps, "approvals": approvals,
