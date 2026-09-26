@@ -308,6 +308,145 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertContains(response, "Nothing is saved until you click")
         item.refresh_from_db()
         self.assertEqual(item.full_name, "Old Name")
+        ocr_attachment = req.attachments.order_by("-pk").first()
+        self.assertEqual(ocr_attachment.extracted_payload.get("usage"), "item_ocr_preview")
+
+    def test_member_validation_error_identifies_member(self):
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+        )
+        item = EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1101-1",
+            full_name="Sara Al Hinai",
+            date_of_birth=date(2018, 9, 22),
+            gender="Female",
+            effective_date=self.today,
+        )
+        errors, _ = ValidationService.validate(req)
+        self.assertTrue(any('Member "Sara Al Hinai"' in error for error in errors))
+        self.assertTrue(any("Relationship is required." in error for error in errors))
+        item.refresh_from_db()
+        self.assertEqual(item.validation_status, EndorsementItem.ValidationStatus.ERROR)
+
+    def test_optional_item_ocr_timeout_does_not_block_valid_member(self):
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+        )
+        EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1101-1",
+            full_name="Sara Al Hinai",
+            relationship="Child",
+            date_of_birth=date(2018, 9, 22),
+            gender="Female",
+            plan=self.plan,
+            effective_date=self.today,
+        )
+        Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("id.pdf", b"fake-pdf", content_type="application/pdf"),
+            original_name="id.pdf",
+            kind=Attachment.Kind.PDF,
+            is_supplemental=True,
+            processed=False,
+            processing_error="timed out",
+            extracted_payload={"usage": "item_ocr_preview", "target_item_id": 1},
+        )
+        errors, score = ValidationService.validate(req)
+        self.assertFalse(any("id.pdf" in error or "timed out" in error for error in errors))
+        self.assertEqual(score, Decimal("100.00"))
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_detail_separates_document_error_from_member_error(self):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+            validation_errors=["id.pdf: timed out"],
+        )
+        EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1101-1",
+            full_name="Sara Al Hinai",
+            relationship="Child",
+            date_of_birth=date(2018, 9, 22),
+            gender="Female",
+            plan=self.plan,
+            effective_date=self.today,
+            validation_status=EndorsementItem.ValidationStatus.VALID,
+        )
+        Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("id.pdf", b"fake-pdf", content_type="application/pdf"),
+            original_name="id.pdf",
+            kind=Attachment.Kind.PDF,
+            processed=False,
+            processing_error="timed out",
+        )
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(f"/endorsements/{req.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Document processing issues")
+        self.assertContains(response, "id.pdf")
+        self.assertContains(response, "timed out")
+        self.assertContains(response, "This is a document-processing error, not a member validation error.")
+        self.assertNotContains(response, "Member validation issues")
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_failed_attachment_can_be_removed_during_validation(self):
+        self.grant_client_access()
+        req = EndorsementRequest.objects.create(
+            policy=self.policy,
+            endorsement_type=EndorsementRequest.Type.ADDITION,
+            effective_date=self.today,
+            requester=self.requester,
+            requester_organization=self.client,
+            status=EndorsementRequest.Status.NEEDS_INFO,
+            validation_errors=["id.pdf: timed out"],
+        )
+        EndorsementItem.objects.create(
+            request=req,
+            employee_no="E1101-1",
+            full_name="Sara Al Hinai",
+            relationship="Child",
+            date_of_birth=date(2018, 9, 22),
+            gender="Female",
+            plan=self.plan,
+            effective_date=self.today,
+        )
+        attachment = Attachment.objects.create(
+            request=req,
+            file=SimpleUploadedFile("id.pdf", b"fake-pdf", content_type="application/pdf"),
+            original_name="id.pdf",
+            kind=Attachment.Kind.PDF,
+            processed=False,
+            processing_error="timed out",
+        )
+        http = Client()
+        http.force_login(self.requester)
+        response = http.post(f"/endorsements/{req.pk}/attachments/{attachment.pk}/remove-failed/")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Attachment.objects.filter(pk=attachment.pk).exists())
 
     @override_settings(STORAGES={
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
