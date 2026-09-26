@@ -1,0 +1,89 @@
+<div class="space-y-4">
+  <section class="se-panel">
+    <div class="se-panel-head">
+      <div><div class="se-eyebrow">Step 4</div><div class="se-panel-title mt-1">TPA / CORE PROCESSING</div></div>
+      <span class="se-status {% if current_step == 'processing' %}se-status-info{% elif current_step == 'completion' %}se-status-ok{% endif %}">{% if current_step == "processing" %}In progress{% elif current_step == "completion" %}Completed{% else %}Pending{% endif %}</span>
+    </div>
+    <div class="grid gap-px bg-base-content/10 sm:grid-cols-4">
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Route</div><div class="mt-1 text-sm font-semibold">{% if endorsement.policy.product == "GROUP_MEDICAL" %}TPA{% else %}Insurer Core{% endif %}</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">TPA</div><div class="mt-1 text-sm font-semibold">{{ endorsement.policy.tpa.name|default:"Not applicable" }}</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">External reference</div><div class="mt-1 font-mono text-sm">{{ endorsement.external_reference|default:"—" }}</div></div>
+      <div class="bg-base-100 p-4"><div class="se-eyebrow">Current status</div><div class="mt-1 text-sm font-semibold">{{ endorsement.get_status_display }}</div></div>
+    </div>
+  </section>
+
+  {% include "endorsements/partials/_member_matrix.html" with allow_member_edit=False show_tpa_controls=True %}
+
+  {% if current_step == "processing" %}
+  <section class="se-panel">
+    <div class="se-panel-head"><div><div class="se-eyebrow">Processing controls</div><div class="se-panel-title mt-1">NEXT ACTION</div></div><i class="bi bi-signpost-split text-primary"></i></div>
+    <div class="grid gap-4 p-4 lg:grid-cols-2">
+      {% if endorsement.status == "SENT_TO_TPA" and can_tpa_process %}
+      <div class="rounded-box border border-info/25 bg-info/5 p-4">
+        <strong class="text-xs">Accept and start processing</strong>
+        <div class="mt-1 text-[10px] opacity-55">Move the case into active TPA processing.</div>
+        <form method="post" action="{% url 'endorsement_start' endorsement.pk %}" class="mt-3">{% csrf_token %}<button class="btn btn-primary btn-sm w-full" type="submit"><i class="bi bi-play-circle"></i>START PROCESSING</button></form>
+      </div>
+      {% endif %}
+
+      {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
+      <div class="rounded-box border border-error/25 bg-error/5 p-4">
+        <strong class="text-xs">Reject and return for correction</strong>
+        <form method="post" action="{% url 'endorsement_tpa_reject' endorsement.pk %}" class="mt-3 space-y-2">
+          {% csrf_token %}
+          <textarea class="textarea textarea-bordered w-full" name="reason" rows="2" placeholder="Mandatory rejection reason" required></textarea>
+          <button class="btn btn-error btn-outline btn-sm w-full" type="submit"><i class="bi bi-x-octagon"></i>REJECT & RETURN</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" or can_insurer_operate and endorsement.status == "CORE_DISPATCHED" %}
+      <div class="rounded-box border border-success/25 bg-success/5 p-4">
+        <strong class="text-xs">Approve / confirm processing completion</strong>
+        <div class="mt-1 text-[10px] opacity-55">TPA medical cases require card number, effective date and amount for every member before completion.</div>
+        <form method="post" action="{% url 'endorsement_complete' endorsement.pk %}" class="mt-3 space-y-2">
+          {% csrf_token %}
+          <input class="input input-bordered w-full" name="external_reference" placeholder="TPA / core completion reference">
+          <button class="btn btn-success btn-sm w-full" type="submit"><i class="bi bi-check-circle"></i>{% if can_tpa_process %}APPROVE & COMPLETE{% else %}CONFIRM COMPLETION{% endif %}</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if can_tpa_process or can_insurer_operate %}
+      <div class="rounded-box border border-warning/25 bg-warning/5 p-4">
+        <strong class="text-xs">Raise clarification query</strong>
+        <form method="post" action="{% url 'endorsement_query' endorsement.pk %}" class="mt-3 space-y-2">
+          {% csrf_token %}
+          <div class="se-field"><label>What is required?</label>{{ query_form.subject }}</div>
+          <div class="se-field"><label>Instructions to requester</label>{{ query_form.message }}</div>
+          <button class="btn btn-warning btn-outline btn-sm w-full" type="submit"><i class="bi bi-chat-left-text"></i>SEND QUERY</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="se-panel">
+    <div class="se-panel-head"><div><div class="se-eyebrow">Communication</div><div class="se-panel-title mt-1">QUERIES & RESPONSES</div></div></div>
+    <div class="divide-y divide-base-content/10">
+    {% for query in endorsement.queries.all %}
+      <div class="p-4">
+        <div class="flex flex-wrap justify-between gap-2"><strong class="text-sm">{{ query.subject }}</strong><span class="font-mono text-[10px] opacity-45">{{ query.created_at|date:"d M H:i" }}</span></div>
+        <p class="mt-2 text-xs opacity-70">{{ query.message }}</p>
+        {% if query.response %}
+          <div class="mt-3 border-l-2 border-success bg-success/5 p-3 text-xs"><strong class="text-success">RESPONSE</strong><div class="mt-1">{{ query.response }}</div></div>
+        {% elif request.user.profile.organization_id == query.assigned_organization_id %}
+          <form method="post" action="{% url 'endorsement_query_answer' endorsement.pk query.pk %}" class="mt-3">
+            {% csrf_token %}
+            <div class="se-field"><label>Response</label>{{ response_form.response }}</div>
+            <button class="btn btn-primary btn-sm mt-2" type="submit">SEND RESPONSE</button>
+          </form>
+        {% else %}
+          <span class="se-status se-status-warn mt-3">Awaiting response</span>
+        {% endif %}
+      </div>
+    {% empty %}<div class="p-6 text-center text-xs opacity-45">No queries have been raised.</div>{% endfor %}
+    </div>
+  </section>
+</div>
