@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("policy-plans/", views.policy_plans, name="policy_plans"),
+    path("policy-plans/sum-assured/", views.policy_plan_sum_assured, name="policy_plan_sum_assured"),
     path("preferences/", views.set_preferences, name="set_preferences"),
     path("notifications/", views.notifications_panel, name="notifications_panel"),
     path("notifications/read/", views.notifications_read, name="notifications_read"),
@@ -13,6 +14,7 @@ urlpatterns = [
     path("endorsements/<int:pk>/recovery/", views.bulk_recovery, name="endorsement_bulk_recovery"),
     path("endorsements/<int:pk>/supplement/", views.supplemental_upload, name="endorsement_supplemental_upload"),
     path("endorsements/<int:pk>/items/<int:item_id>/edit/", views.edit_item, name="endorsement_item_edit"),
+    path("endorsements/<int:pk>/items/<int:item_id>/delete/", views.delete_item, name="endorsement_item_delete"),
     path("endorsements/<int:pk>/items/<int:item_id>/tpa/", views.tpa_update_item, name="endorsement_tpa_item"),
     path("endorsements/<int:pk>/approvals/<int:approval_id>/", views.decide_approval, name="endorsement_approval"),
     path("endorsements/<int:pk>/start/", views.start_processing, name="endorsement_start"),
