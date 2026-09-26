@@ -1,0 +1,56 @@
+name: Apply SmartEndorse V2 Patch
+
+on:
+  push:
+    branches:
+      - feature/adminlte-workflow-v2
+    paths:
+      - ".github/workflows/apply-feature-patch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/adminlte-workflow-v2
+          fetch-depth: 0
+
+      - name: Verify and extract prepared patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .patch/part00.b64 .patch/part01.b64 .patch/part02.b64 > /tmp/smartendorse-patch.b64
+          echo "4f3c5d8d6bf374e3b35ff54a2dd79ce678d9d391c37afcfa2053f3dff8747dcb  /tmp/smartendorse-patch.b64" | sha256sum -c -
+          base64 -d /tmp/smartendorse-patch.b64 > /tmp/smartendorse-patch.tar.xz
+          echo "91d45c8d411bd4b8902f82aa9e660d49db1bf938b48f29c12045fc04950e6e18  /tmp/smartendorse-patch.tar.xz" | sha256sum -c -
+          python3 - <<'PY'
+          import pathlib
+          import tarfile
+
+          root = pathlib.Path.cwd().resolve()
+          archive = pathlib.Path("/tmp/smartendorse-patch.tar.xz")
+          with tarfile.open(archive, "r:xz") as tar:
+              for member in tar.getmembers():
+                  target = (root / member.name).resolve()
+                  if root != target and root not in target.parents:
+                      raise RuntimeError(f"Unsafe archive member: {member.name}")
+              tar.extractall(root)
+          PY
+
+      - name: Commit application changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .patch
+          rm -f .github/workflows/apply-feature-patch.yml
+          git config user.name "SmartEndorse Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement AdminLTE workflow v2 [patch-applied]"
+          git push origin HEAD:feature/adminlte-workflow-v2
