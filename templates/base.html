@@ -86,7 +86,7 @@
   <div class="breadcrumbs">
     <a href="{% url 'dashboard' %}">Home</a>
     <span aria-hidden="true">›</span>
-    <span>{% block breadcrumb_label %}{% block page_title %}SmartEndorse{% endblock %}{% endblock %}</span>
+    <span>{% block breadcrumb_label %}SmartEndorse{% endblock %}</span>
   </div>
 
   <button id="portal-nav-toggle" class="portal-nav-toggle" type="button" aria-label="Toggle navigation">
@@ -134,7 +134,7 @@
     <main id="content-start" class="content portal-content" tabindex="-1">
       <div id="content" class="colM">
         <div class="portal-title-row">
-          <h1>{% block page_heading %}{{ block.super }}{% endblock %}</h1>
+          <h1>{% block page_title %}SmartEndorse{% endblock %}</h1>
           {% block object_tools %}{% endblock %}
         </div>
 
