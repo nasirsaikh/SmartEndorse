@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -137,6 +137,10 @@ class ValidationAndApprovalTests(BaseInsuranceTest):
             WorkflowService.complete(req, self.tpa_user)
 
 
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
     def test_resolution_event_without_filled_key_renders_detail(self):
         PolicyAccess.objects.get_or_create(policy=self.policy, organization=self.client, defaults={"can_create": True})
         req = EndorsementRequest.objects.create(
