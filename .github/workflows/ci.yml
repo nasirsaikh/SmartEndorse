@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -23,18 +23,8 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Generate initial migration for validation
-        run: python manage.py makemigrations core --noinput
+      - name: Verify migrations are committed
+        run: python manage.py makemigrations --check --dry-run
       - run: python manage.py migrate --noinput
       - run: python manage.py check
       - run: python manage.py test
-      - name: Commit generated initial migration
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          if git status --porcelain core/migrations | grep -q 0001_initial.py; then
-            git config user.name "SmartEndorse CI"
-            git config user.email "actions@users.noreply.github.com"
-            git add core/migrations/0001_initial.py
-            git commit -m "Add generated initial migration [skip ci]"
-            git push
-          fi
