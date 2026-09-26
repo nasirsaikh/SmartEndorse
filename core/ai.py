@@ -37,10 +37,19 @@ DEFAULT_STRUCTURED_INSTRUCTIONS = (
 
 class AIService:
     def __init__(self, config=None, product="", context=None):
-        self.config = config or AIProviderConfig.objects.filter(is_active=True).first()
+        self.config = config or self._select_text_provider()
         self.product = product or ""
         self.context = context or {}
         self.last_profile = None
+
+    @staticmethod
+    def _select_text_provider():
+        qs = AIProviderConfig.objects.filter(is_active=True)
+        return qs.filter(supports_vision=False).order_by("-updated_at", "-pk").first() or qs.order_by("-updated_at", "-pk").first()
+
+    @staticmethod
+    def _select_vision_provider():
+        return AIProviderConfig.objects.filter(is_active=True, supports_vision=True).order_by("-updated_at", "-pk").first()
 
     @property
     def available(self):
@@ -127,13 +136,23 @@ class AIService:
         return self._parse_json_array(self._vision(prompt, encoded, mime, system))
 
     def _require_provider(self, vision=False):
+        if vision:
+            if not self.config or not self.config.supports_vision:
+                vision_provider = self._select_vision_provider()
+                if vision_provider:
+                    self.config = vision_provider
+            if not self.config:
+                raise RuntimeError("No active AI provider is configured.")
+            if not self.config.supports_vision:
+                raise RuntimeError(
+                    "No active vision-capable AI provider is configured. "
+                    "Add or enable a vision model in Django Admin > AI provider configs and mark Supports vision."
+                )
+            return
+        if not self.config:
+            self.config = self._select_text_provider()
         if not self.config:
             raise RuntimeError("No active AI provider is configured.")
-        if vision and not self.config.supports_vision:
-            raise RuntimeError(
-                f"Active AI provider {self.config.name} is not marked as vision-capable. "
-                "Configure a vision model in Django Admin > AI provider configs and enable Supports vision."
-            )
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
