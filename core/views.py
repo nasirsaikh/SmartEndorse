@@ -482,8 +482,9 @@ def retry_failed_evidence_bundle(request, pk):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
-        messages.error(request, "Failed documents can only be retried while the endorsement is in validation/correction.")
+        messages.error(request, "Failed documents can only be retried while the endorsement is in intake/correction.")
         return redirect("endorsement_detail", pk=pk)
 
     failed = []
@@ -504,11 +505,10 @@ def retry_failed_evidence_bundle(request, pk):
         else:
             result = FileIntakeService.process_initial_evidence_bundle(failed)
 
-        WorkflowService.revalidate_after_correction(endorsement, request.user)
         messages.success(
             request,
             f"{result['processed']} failed document(s) were retried together as one evidence bundle; "
-            f"{result['rows']} member row(s) were identified.",
+            f"{result['rows']} member row(s) were identified. Review the result, then use Validate & Submit.",
         )
     except Exception as exc:
         logger.exception("Failed evidence bundle retry failed for endorsement %s", endorsement.pk)
@@ -553,8 +553,9 @@ def remove_failed_attachment(request, pk, attachment_id):
         EndorsementRequest.Status.DRAFT,
         EndorsementRequest.Status.NEEDS_INFO,
         EndorsementRequest.Status.TPA_QUERY,
+        EndorsementRequest.Status.REJECTED,
     }:
-        messages.error(request, "Failed documents can only be removed while the endorsement is in validation/correction.")
+        messages.error(request, "Failed documents can only be removed while the endorsement is in intake/correction.")
         return redirect("endorsement_detail", pk=pk)
 
     attachment = get_object_or_404(endorsement.attachments, pk=attachment_id)
@@ -571,8 +572,7 @@ def remove_failed_attachment(request, pk, attachment_id):
         description=f"Failed document {name} removed during validation.",
         payload={"file_name": name},
     )
-    WorkflowService.revalidate_after_correction(endorsement, request.user)
-    messages.success(request, f"{name} was removed and the endorsement was revalidated.")
+    messages.success(request, f"{name} was removed. Review the request, then use Validate & Submit.")
     return redirect("endorsement_detail", pk=pk)
 
 
@@ -695,8 +695,7 @@ def edit_item(request, pk, item_id):
                 description=f"Item {item.pk} corrected manually.",
                 payload={"item_id": item.pk, "before": before, "after": {k: json_safe(v) for k, v in form.cleaned_data.items()}},
             )
-            WorkflowService.revalidate_after_correction(endorsement, request.user)
-            messages.success(request, "Item updated and the endorsement was revalidated.")
+            messages.success(request, "Item updated. Review the intake/correction and use Validate & Submit when ready.")
             return redirect("endorsement_detail", pk=pk)
     else:
         form = EndorsementItemCorrectionForm(instance=item)
@@ -714,8 +713,8 @@ def delete_item(request, pk, item_id):
     endorsement = _get_accessible_request(request.user, pk)
     if not can_edit_request(request.user, endorsement):
         raise PermissionDenied
-    if endorsement.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO}:
-        messages.error(request, "Member rows can only be deleted while the endorsement is in validation.")
+    if endorsement.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED, EndorsementRequest.Status.TPA_QUERY}:
+        messages.error(request, "Member rows can only be deleted while the endorsement is in intake/correction.")
         return redirect("endorsement_detail", pk=pk)
 
     item = get_object_or_404(endorsement.items, pk=item_id)
@@ -735,8 +734,7 @@ def delete_item(request, pk, item_id):
         description=f"Item {deleted_id} deleted during validation.",
         payload=snapshot,
     )
-    WorkflowService.revalidate_after_correction(endorsement, request.user)
-    messages.success(request, f"Member row {deleted_id} deleted and the endorsement was revalidated.")
+    messages.success(request, f"Member row {deleted_id} deleted. Review the request, then use Validate & Submit.")
     return redirect("endorsement_detail", pk=pk)
 
 
@@ -749,8 +747,8 @@ def supplemental_upload(request, pk):
     if not can_edit_request(request.user, endorsement):
         messages.error(request, "You do not have permission to correct this endorsement.")
         return redirect("endorsement_detail", pk=pk)
-    if endorsement.status not in {EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.TPA_QUERY}:
-        messages.warning(request, "Validation correction is only available while this endorsement is waiting for corrected information.")
+    if endorsement.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO, EndorsementRequest.Status.REJECTED, EndorsementRequest.Status.TPA_QUERY}:
+        messages.warning(request, "File intake/correction is only available while this endorsement is editable.")
         return redirect("endorsement_detail", pk=pk)
 
     form = SupplementalUploadForm(request.POST, request.FILES)
@@ -801,25 +799,22 @@ def supplemental_upload(request, pk):
                     for attachment in evidence_attachments
                 )
 
-        if processed:
-            WorkflowService.revalidate_after_correction(endorsement, request.user)
-
         if failures:
             text = "; ".join(failures)
             if processed:
-                messages.warning(request, f"{processed} validation file(s) were processed, but some failed: {text}")
+                messages.warning(request, f"{processed} file(s) were processed, but some failed: {text}. Review the result before Validate & Submit.")
             else:
                 messages.error(request, f"Validation upload failed for {endorsement.reference}: {text}")
         elif warnings:
             messages.warning(
                 request,
-                f"{processed} validation file(s) were applied as one evidence bundle. "
+                f"{processed} file(s) were applied as one evidence bundle. "
                 f"Some files could not be read, but the remaining evidence was sufficient: {'; '.join(warnings)}",
             )
         else:
             messages.success(
                 request,
-                f"{processed} validation file(s) processed. PDF/image files uploaded together were treated as one evidence bundle, so front/back pages can complement each other.",
+                f"{processed} file(s) processed. PDF/image files uploaded together were treated as one evidence bundle, so front/back pages can complement each other. Review the result, then use Validate & Submit.",
             )
     except Exception as exc:
         logger.exception("Supplemental upload failed for endorsement %s", endorsement.pk)
@@ -855,7 +850,7 @@ def tpa_update_item(request, pk, item_id):
         approval = WorkflowService.update_tpa_item(item, request.user, form.cleaned_data["card_number"], form.cleaned_data["effective_date"], form.cleaned_data["amount"])
         messages.warning(request, "Amount changed; approval was raised and relevant parties were notified.") if approval else messages.success(request, "TPA member processing data updated.")
     else:
-        messages.error(request, "Card number and amount are required.")
+        messages.error(request, "Card number, effective date and amount are required.")
     return redirect("endorsement_detail", pk=pk)
 
 
@@ -876,6 +871,25 @@ def decide_approval(request, pk, approval_id):
             return redirect("endorsement_detail", pk=pk)
         WorkflowService.decide_approval(approval, request.user, approving, comment)
         messages.success(request, "Approval decision recorded with full audit history.")
+    return redirect("endorsement_detail", pk=pk)
+
+
+@login_required
+def tpa_reject_request(request, pk):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    endorsement = _get_accessible_request(request.user, pk)
+    if not can_tpa_process(request.user, endorsement):
+        raise PermissionDenied
+    if endorsement.status not in {EndorsementRequest.Status.SENT_TO_TPA, EndorsementRequest.Status.TPA_IN_PROGRESS}:
+        messages.error(request, "TPA rejection is only available while the request is in TPA processing.")
+        return redirect("endorsement_detail", pk=pk)
+    reason = request.POST.get("reason", "").strip()
+    if not reason:
+        messages.error(request, "TPA rejection reason is mandatory.")
+        return redirect("endorsement_detail", pk=pk)
+    WorkflowService.reject_by_tpa(endorsement, request.user, reason)
+    messages.warning(request, "TPA rejected the endorsement. The requester/insurer can correct it and resubmit.")
     return redirect("endorsement_detail", pk=pk)
 
 
