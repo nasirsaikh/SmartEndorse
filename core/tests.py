@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -154,8 +154,9 @@ class ValidationAndApprovalTests(BaseInsuranceTest):
             description="Supplemental upload created item 18.",
             payload={"item_id": 18, "source": "id.pdf"},
         )
-        self.client.force_login(self.requester)
-        response = self.client.get(f"/endorsements/{req.pk}/")
+        http = Client()
+        http.force_login(self.requester)
+        response = http.get(f"/endorsements/{req.pk}/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "id.pdf")
         self.assertContains(response, "Supplemental upload created item 18.")
@@ -182,13 +183,14 @@ class ValidationAndApprovalTests(BaseInsuranceTest):
         self.valid_item(selected, employee_no="SEL-1", national_id="SEL-N1")
         self.valid_item(other, employee_no="OTH-1", national_id="OTH-N1")
         process_mock.return_value = 0
-        self.client.force_login(self.requester)
+        http = Client()
+        http.force_login(self.requester)
         upload = SimpleUploadedFile(
             "correction.csv",
             b"employee_no,date_of_birth\nSEL-1,1990-01-01\n",
             content_type="text/csv",
         )
-        response = self.client.post(
+        response = http.post(
             f"/endorsements/{selected.pk}/recovery/",
             {"attachments": upload},
         )
