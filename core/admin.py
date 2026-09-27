@@ -2,8 +2,8 @@ from django import forms
 from django.contrib import admin
 
 from .models import (
-    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementQuery,
-    EndorsementRequest, IntegrationEndpoint, Organization, PlatformConfiguration,
+    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EmailIntakeMailbox, EmailIntakeMessage, EmailIntakeRoute,
+    EndorsementApproval, EndorsementItem, EndorsementQuery, EndorsementRequest, IntegrationEndpoint, Organization, PlatformConfiguration,
     Policy, PolicyAccess, PolicyMember, PolicyPlan, PortalNotification, RecoveryUpload, SLAProfile,
     UserProfile, WorkflowEvent,
 )
@@ -109,6 +109,80 @@ class AIExtractionProfileAdmin(admin.ModelAdmin):
     @admin.display(description="Examples")
     def example_count(self, obj):
         return obj.examples.filter(is_active=True).count()
+
+
+class EmailIntakeMailboxAdminForm(forms.ModelForm):
+    class Meta:
+        model = EmailIntakeMailbox
+        fields = "__all__"
+        widgets = {
+            "imap_password": forms.PasswordInput(render_value=True),
+            "graph_client_secret": forms.PasswordInput(render_value=True),
+        }
+
+
+class EmailIntakeRouteInline(admin.TabularInline):
+    model = EmailIntakeRoute
+    extra = 0
+    fields = ("sender_pattern", "organization", "requester", "default_policy", "default_endorsement_type", "priority", "is_active")
+
+
+@admin.register(EmailIntakeMailbox)
+class EmailIntakeMailboxAdmin(admin.ModelAdmin):
+    form = EmailIntakeMailboxAdminForm
+    list_display = ("name", "email_address", "provider", "is_active", "auto_submit", "last_polled_at")
+    list_filter = ("provider", "is_active", "auto_submit", "mark_as_read")
+    search_fields = ("name", "email_address")
+    inlines = [EmailIntakeRouteInline]
+    actions = ("poll_selected_mailboxes",)
+    fieldsets = (
+        ("Mailbox", {"fields": ("name", "email_address", "provider", "is_active", "folder", "max_messages_per_poll", "poll_interval_seconds")}),
+        ("Automation", {"fields": ("auto_submit", "mark_as_read", "default_requester")}),
+        ("Microsoft 365 / Graph", {
+            "fields": ("graph_tenant_id", "graph_client_id", "graph_client_secret"),
+            "description": "Use an Entra ID app with Microsoft Graph application permission Mail.ReadWrite for this mailbox. Admin consent is required.",
+        }),
+        ("IMAP", {
+            "fields": ("imap_host", "imap_port", "imap_username", "imap_password", "imap_use_ssl"),
+            "description": "Use IMAP for providers that permit it. For Microsoft 365, Graph is recommended.",
+        }),
+        ("Runtime", {"fields": ("last_polled_at",)}),
+    )
+    readonly_fields = ("last_polled_at",)
+
+    @admin.action(description="Poll selected mailbox(es) now")
+    def poll_selected_mailboxes(self, request, queryset):
+        from .email_intake import EmailIntakeService
+
+        messages_seen = processed = failed = 0
+        for mailbox in queryset.filter(is_active=True):
+            stats = EmailIntakeService.poll_mailbox(mailbox)
+            messages_seen += stats["messages"]
+            processed += stats["processed"]
+            failed += stats["failed"]
+        self.message_user(
+            request,
+            f"Email intake completed: {messages_seen} message(s), {processed} processed, {failed} failed/review.",
+        )
+
+
+@admin.register(EmailIntakeRoute)
+class EmailIntakeRouteAdmin(admin.ModelAdmin):
+    list_display = ("mailbox", "sender_pattern", "organization", "requester", "default_policy", "default_endorsement_type", "priority", "is_active")
+    list_filter = ("mailbox", "organization", "default_endorsement_type", "is_active")
+    search_fields = ("sender_pattern", "organization__name", "organization__code", "requester__username", "requester__email")
+
+
+@admin.register(EmailIntakeMessage)
+class EmailIntakeMessageAdmin(admin.ModelAdmin):
+    list_display = ("received_at", "mailbox", "sender_email", "subject", "status", "request", "attachment_count")
+    list_filter = ("mailbox", "status")
+    search_fields = ("sender_email", "subject", "internet_message_id", "provider_message_id", "request__reference")
+    readonly_fields = (
+        "mailbox", "provider_message_id", "internet_message_id", "sender_email", "sender_name",
+        "subject", "body_text", "received_at", "status", "request", "attachment_count",
+        "error", "metadata", "processed_at", "created_at", "updated_at",
+    )
 
 
 @admin.register(SLAProfile)

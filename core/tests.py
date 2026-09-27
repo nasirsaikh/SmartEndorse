@@ -10,11 +10,13 @@ from unittest.mock import MagicMock, patch
 from .access import accessible_policies, can_decide_approval
 from .ai import AIService
 from .models import (
-    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
+    AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EmailIntakeMailbox, EmailIntakeMessage, EmailIntakeRoute,
+    EndorsementApproval, EndorsementItem, EndorsementRequest, Organization,
     PlatformConfiguration, Policy, PolicyAccess, PolicyMember, PolicyPlan, UserProfile, WorkflowEvent,
 )
 from .forms import EndorsementItemCorrectionForm
 from .services import FileIntakeService, PricingEngine, ValidationService, WorkflowService
+from .email_intake import EmailIntakeService
 
 
 class BaseInsuranceTest(TestCase):
@@ -1675,3 +1677,94 @@ class ValidationAndApprovalTests(BaseInsuranceTest):
         _, target = process_mock.call_args.args
         self.assertEqual(target.pk, selected.pk)
         self.assertNotEqual(target.pk, other.pk)
+
+
+
+class EmailIntakeServiceTests(BaseInsuranceTest):
+    def setUp(self):
+        super().setUp()
+        self.requester.email = "hr@client.example"
+        self.requester.save(update_fields=["email"])
+        self.mailbox = EmailIntakeMailbox.objects.create(
+            name="Endorsement Inbox",
+            email_address="endorsements@example.com",
+            provider=EmailIntakeMailbox.Provider.IMAP,
+            auto_submit=False,
+        )
+        self.route = EmailIntakeRoute.objects.create(
+            mailbox=self.mailbox,
+            sender_pattern="@client.example",
+            organization=self.client,
+            requester=self.requester,
+            default_policy=self.policy,
+            default_endorsement_type=EndorsementRequest.Type.ADDITION,
+        )
+
+    def test_email_body_creates_endorsement_and_member_without_ai(self):
+        effective = min(self.today + timedelta(days=2), self.policy.effective_to)
+        body = (
+            "Please add the below employee.\n"
+            "Member Name: Email Member\n"
+            "Employee No: E-MAIL-1\n"
+            "Date of Birth: 01/01/1990\n"
+            "Gender: Male\n"
+            "Relationship: Employee\n"
+            "Plan: G\n"
+            f"Effective Date: {effective:%d/%m/%Y}\n"
+        )
+        record = EmailIntakeMessage.objects.create(
+            mailbox=self.mailbox,
+            provider_message_id="msg-1",
+            sender_email="hr@client.example",
+            subject="Addition request",
+            body_text=body,
+            received_at=timezone.now(),
+        )
+        source = {
+            "provider_message_id": "msg-1",
+            "sender_email": "hr@client.example",
+            "subject": "Addition request",
+            "body_text": body,
+            "received_at": timezone.now(),
+            "attachments": [],
+        }
+
+        request_obj = EmailIntakeService.process_message(record, source)
+
+        request_obj.refresh_from_db()
+        record.refresh_from_db()
+        self.assertEqual(request_obj.metadata["intake_channel"], "EMAIL")
+        self.assertEqual(request_obj.policy, self.policy)
+        self.assertEqual(request_obj.endorsement_type, EndorsementRequest.Type.ADDITION)
+        self.assertEqual(request_obj.effective_date, effective)
+        self.assertEqual(request_obj.status, EndorsementRequest.Status.DRAFT)
+        self.assertEqual(record.status, EmailIntakeMessage.Status.PROCESSED)
+        item = request_obj.items.get()
+        self.assertEqual(item.full_name, "Email Member")
+        self.assertEqual(item.employee_no, "E-MAIL-1")
+        self.assertEqual(item.plan, self.plan)
+
+    def test_sender_domain_route_matches(self):
+        route, requester, organization = EmailIntakeService._resolve_sender(
+            self.mailbox, "another.person@client.example"
+        )
+        self.assertEqual(route, self.route)
+        self.assertEqual(requester, self.requester)
+        self.assertEqual(organization, self.client)
+
+    def test_policy_number_in_email_takes_precedence_over_route_default(self):
+        second = Policy.objects.create(
+            policy_number="P2",
+            policy_name="Second Medical",
+            product=Policy.Product.GROUP_MEDICAL,
+            insurer=self.insurer,
+            client=self.client,
+            tpa=self.tpa,
+            effective_from=self.policy.effective_from,
+            effective_to=self.policy.effective_to,
+            rating_method=Policy.RatingMethod.FLAT_ANNUAL,
+        )
+        resolved = EmailIntakeService._resolve_policy(
+            "Please process policy P2 addition", self.client, self.route
+        )
+        self.assertEqual(resolved, second)
