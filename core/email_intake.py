@@ -39,9 +39,16 @@ class EmailIntakeService:
     """Read inbound endorsement emails and route them through the normal SmartEndorse workflow."""
 
     @classmethod
-    def poll_all(cls):
+    def poll_all(cls, force=False):
         result = {"mailboxes": 0, "messages": 0, "processed": 0, "failed": 0}
+        now = timezone.now()
         for mailbox in EmailIntakeMailbox.objects.filter(is_active=True).order_by("id"):
+            if (
+                not force
+                and mailbox.last_polled_at
+                and (now - mailbox.last_polled_at).total_seconds() < mailbox.poll_interval_seconds
+            ):
+                continue
             result["mailboxes"] += 1
             stats = cls.poll_mailbox(mailbox)
             for key in ("messages", "processed", "failed"):
@@ -96,10 +103,16 @@ class EmailIntakeService:
                     stats["processed"] += 1
                     cls._mark_source_read(mailbox, source)
                 except Exception as exc:
-                    record.status = EmailIntakeMessage.Status.FAILED
+                    record.status = (
+                        EmailIntakeMessage.Status.NEEDS_REVIEW
+                        if record.request_id
+                        else EmailIntakeMessage.Status.FAILED
+                    )
                     record.error = str(exc)
                     record.processed_at = timezone.now()
                     record.save(update_fields=["status", "error", "processed_at", "updated_at"])
+                    if record.request_id:
+                        cls._mark_source_read(mailbox, source)
                     stats["failed"] += 1
             mailbox.last_polled_at = timezone.now()
             mailbox.save(update_fields=["last_polled_at", "updated_at"])
