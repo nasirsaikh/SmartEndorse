@@ -134,6 +134,7 @@ class EmailIntakeMailboxAdmin(admin.ModelAdmin):
     list_filter = ("provider", "is_active", "auto_submit", "mark_as_read")
     search_fields = ("name", "email_address")
     inlines = [EmailIntakeRouteInline]
+    actions = ("poll_selected_mailboxes",)
     fieldsets = (
         ("Mailbox", {"fields": ("name", "email_address", "provider", "is_active", "folder", "max_messages_per_poll", "poll_interval_seconds")}),
         ("Automation", {"fields": ("auto_submit", "mark_as_read", "default_requester")}),
@@ -148,6 +149,21 @@ class EmailIntakeMailboxAdmin(admin.ModelAdmin):
         ("Runtime", {"fields": ("last_polled_at",)}),
     )
     readonly_fields = ("last_polled_at",)
+
+    @admin.action(description="Poll selected mailbox(es) now")
+    def poll_selected_mailboxes(self, request, queryset):
+        from .email_intake import EmailIntakeService
+
+        messages_seen = processed = failed = 0
+        for mailbox in queryset.filter(is_active=True):
+            stats = EmailIntakeService.poll_mailbox(mailbox)
+            messages_seen += stats["messages"]
+            processed += stats["processed"]
+            failed += stats["failed"]
+        self.message_user(
+            request,
+            f"Email intake completed: {messages_seen} message(s), {processed} processed, {failed} failed/review.",
+        )
 
 
 @admin.register(EmailIntakeRoute)
