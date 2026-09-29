@@ -1,3 +1,19 @@
+@import "tailwindcss" source(none);
+
+@source "../templates/**/*.html";
+@source "../core/**/*.py";
+@source "../static/js/**/*.js";
+
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+/*
+ * SmartEndorse application styles.
+ * Tailwind utilities + daisyUI components are compiled together by django-tailwind-cli.
+ * Keep this source file outside STATICFILES_DIRS; output is written to static/css/tailwind.css.
+ */
+
 [x-cloak]{display:none!important;}
 
 :root{

@@ -14,6 +14,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_tailwind_cli",
     "django_htmx",
     "core",
 ]
@@ -82,6 +83,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+
+# Tailwind CSS 4 + daisyUI are compiled by django-tailwind-cli.
+# No Node.js/npm runtime is required for local development or production builds.
+TAILWIND_CLI_USE_DAISY_UI = True
+TAILWIND_CLI_SRC_CSS = "styles/tailwind.css"
+TAILWIND_CLI_DIST_CSS = "css/tailwind.css"
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
