@@ -26,5 +26,7 @@ jobs:
       - name: Verify migrations are committed
         run: python manage.py makemigrations --check --dry-run
       - run: python manage.py migrate --noinput
+      - name: Build Tailwind + daisyUI CSS
+        run: python manage.py tailwind build
       - run: python manage.py check
       - run: python manage.py test
