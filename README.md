@@ -7,6 +7,7 @@ The design follows a zero-touch operating model: structured or unstructured requ
 ## What is included
 
 - Django 5.2 LTS backend with Django Admin as the configuration control plane.
+- Tailwind CSS 4 + daisyUI frontend compiled by `django-tailwind-cli` with no Node.js/npm requirement.
 - HTMX request filtering and dependent plan selection without a SPA framework.
 - Plotly dashboards for client, insurer and TPA operating views.
 - Organization model covering insurer, direct client, broker, agent, channel partner and TPA.
@@ -89,7 +90,7 @@ Windows:
     copy .env.example .env
     python manage.py migrate
     python manage.py seed_demo
-    python manage.py runserver
+    python manage.py tailwind runserver
 
 Linux/macOS:
 
@@ -99,7 +100,7 @@ Linux/macOS:
     cp .env.example .env
     python manage.py migrate
     python manage.py seed_demo
-    python manage.py runserver
+    python manage.py tailwind runserver
 
 Open http://127.0.0.1:8000/
 
@@ -239,6 +240,31 @@ Schedule this command every 10-15 minutes using cron, systemd timer, Kubernetes 
 It records one SLA_BREACH event per breached due timestamp and sends escalation email to relevant configured organizations when email notifications are enabled.
 
 For high-volume production, move notification delivery and integrations to a durable queue with idempotency and retries.
+
+## Frontend build
+
+SmartEndorse uses `django-tailwind-cli==4.8.0` to compile Tailwind CSS 4 and daisyUI directly through Django. Node.js, npm, webpack and the browser Tailwind CDN are not required.
+
+Development server with automatic CSS rebuilds:
+
+    python manage.py tailwind runserver
+
+If you prefer separate processes:
+
+    python manage.py tailwind watch
+    python manage.py runserver
+
+Production/static build:
+
+    python manage.py tailwind build
+    python manage.py collectstatic --noinput
+
+The editable source stylesheet is `styles/tailwind.css`. The generated stylesheet is `static/css/tailwind.css` and is intentionally not committed. daisyUI is configured with the built-in `light` and `dark` themes, matching the portal theme toggle.
+
+Useful diagnostics:
+
+    python manage.py tailwind config
+    python manage.py tailwind troubleshoot
 
 ## Docker
 
