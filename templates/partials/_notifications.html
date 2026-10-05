@@ -1,23 +1,23 @@
-<div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3" data-unread-count="{{ unread_notifications }}">
+<div class="d-flex align-items-center justify-content-between border-bottom border-body px-3 py-3" data-unread-count="{{ unread_notifications }}">
   <div>
-    <div class="font-mono text-xs font-bold tracking-wide">NOTIFICATIONS</div>
-    <div class="mt-0.5 text-[10px] opacity-45">{{ unread_notifications }} unread</div>
+    <div class="font-monospace glis-text-xs fw-bold glis-letter-spacing">NOTIFICATIONS</div>
+    <div class="mt-1 se-text-meta opacity-50">{{ unread_notifications }} unread</div>
   </div>
-  {% if unread_notifications %}<button class="btn btn-ghost btn-xs" hx-post="{% url 'notifications_read' %}" hx-target="#notification-panel" hx-swap="innerHTML">MARK ALL READ</button>{% endif %}
+  {% if unread_notifications %}<button class="btn btn-light btn-sm glis-btn-xs" hx-post="{% url 'notifications_read' %}" hx-target="#notification-panel" hx-swap="innerHTML">MARK ALL READ</button>{% endif %}
 </div>
-<div class="max-h-[70vh] overflow-y-auto">
+<div class="se-scroll-members overflow-y-auto">
 {% for note in notifications %}
-  <a href="{{ note.link|default:'#' }}" class="block border-b border-base-content/10 px-4 py-3 transition hover:bg-base-200 {% if not note.is_read %}border-l-2 border-l-primary bg-primary/5{% endif %}" data-notification-id="{{ note.pk }}" data-notification-title="{{ note.title|escape }}" data-notification-message="{{ note.message|escape }}">
-    <div class="flex gap-3">
-      <span class="mt-1 status {% if note.level == 'SUCCESS' %}status-success{% elif note.level == 'WARNING' %}status-warning{% elif note.level == 'DANGER' %}status-error{% else %}status-info{% endif %}"></span>
-      <div class="min-w-0">
-        <div class="truncate text-xs font-semibold">{{ note.title }}</div>
-        <div class="mt-1 text-[11px] leading-4 opacity-60">{{ note.message }}</div>
-        <div class="mt-1 font-mono text-[9px] uppercase tracking-wider opacity-35">{{ note.created_at|timesince }} ago</div>
+  <a href="{{ note.link|default:'#' }}" class="d-block border-bottom border-body px-3 py-3 se-transition se-hover-row {% if not note.is_read %}border-start border-2 border-primary bg-primary-subtle{% endif %}" data-notification-id="{{ note.pk }}" data-notification-title="{{ note.title|escape }}" data-notification-message="{{ note.message|escape }}">
+    <div class="d-flex gap-3">
+      <span class="mt-1 se-status-dot {% if note.level == 'SUCCESS' %}text-success{% elif note.level == 'WARNING' %}text-warning{% elif note.level == 'DANGER' %}text-danger{% else %}text-info{% endif %}"></span>
+      <div class="glis-min-width-0">
+        <div class="text-truncate glis-text-xs fw-semibold">{{ note.title }}</div>
+        <div class="mt-1 glis-text-xs lh-sm opacity-75">{{ note.message }}</div>
+        <div class="mt-1 font-monospace se-text-meta text-uppercase glis-letter-spacing opacity-50">{{ note.created_at|timesince }} ago</div>
       </div>
     </div>
   </a>
 {% empty %}
-  <div class="p-8 text-center text-xs opacity-45"><i class="bi bi-bell-slash mb-2 block text-2xl"></i>No notifications</div>
+  <div class="p-5 text-center glis-text-xs opacity-50"><i class="bi bi-bell-slash mb-2 d-block fs-3"></i>No notifications</div>
 {% endfor %}
 </div>

@@ -4,7 +4,6 @@ from pathlib import Path
 import json
 import logging
 
-import plotly.graph_objects as go
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -40,22 +39,18 @@ def _form_error_text(form):
     return "; ".join(parts) or "Invalid request."
 
 
-def _chart_html(qs):
+def _chart_data(qs):
     statuses = Counter(qs.values_list("status", flat=True))
     status_map = dict(EndorsementRequest.Status.choices)
-    labels = [status_map.get(key, key) for key in statuses]
-    fig1 = go.Figure(data=[go.Bar(x=labels, y=list(statuses.values()), marker_color="#55e6b0")])
-    fig1.update_layout(height=300, margin=dict(l=34, r=18, t=24, b=42), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", bargap=0.38)
-
     monthly = defaultdict(int)
     start = timezone.now() - timedelta(days=180)
     for created_at in qs.filter(created_at__gte=start).values_list("created_at", flat=True):
         monthly[created_at.strftime("%Y-%m")] += 1
     months = sorted(monthly)
-    fig2 = go.Figure(data=[go.Scatter(x=months, y=[monthly[month] for month in months], mode="lines+markers", line=dict(color="#55e6b0", width=2), marker=dict(color="#f2b84b", size=7))])
-    fig2.update_layout(height=300, margin=dict(l=34, r=18, t=24, b=42), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    config = {"displayModeBar": False, "responsive": True}
-    return fig1.to_html(full_html=False, include_plotlyjs=False, config=config), fig2.to_html(full_html=False, include_plotlyjs=False, config=config)
+    return (
+        {"type": "bar", "categories": [status_map.get(key, key) for key in statuses], "series": [{"name": "Requests", "data": list(statuses.values())}]},
+        {"type": "line", "categories": months, "series": [{"name": "Requests", "data": [monthly[month] for month in months]}]},
+    )
 
 
 @login_required
@@ -66,7 +61,7 @@ def dashboard(request):
     breached = sum(1 for item in qs.exclude(current_sla_due_at=None).exclude(status=EndorsementRequest.Status.COMPLETED) if item.sla_breached)
     stp = qs.filter(stp_eligible=True).count()
     premium = qs.aggregate(total=Sum("premium_impact"))["total"] or 0
-    chart_status, chart_trend = _chart_html(qs)
+    chart_status, chart_trend = _chart_data(qs)
     try:
         org_type = request.user.profile.organization.organization_type
     except Exception:
@@ -499,7 +494,7 @@ def _resolution_changes(endorsement):
     events = endorsement.events.filter(
         event_type__in=[
             "ITEM_RECOVERED", "ITEM_MANUALLY_CORRECTED", "BULK_ITEM_RECOVERED",
-            "SOURCE_DATA_RECOVERED", "TPA_ITEM_UPDATED",
+            "SOURCE_DATA_RECOVERED", "TPA_ITEM_UPDATED", "EMAIL_MEMBER_CORRECTED", "EMAIL_CORRECT_MEMBER_CHANGED",
         ]
     ).order_by("-created_at")
     for event in events:
@@ -693,7 +688,7 @@ def request_detail(request, pk):
         if not attachment.processing_error:
             continue
         payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
-        optional_ocr = payload.get("usage") == "item_ocr_preview"
+        optional_ocr = payload.get("usage") == "item_ocr_preview" or bool(payload.get("superseded_by_email_id"))
         document_issues.append({
             "attachment": attachment,
             "error": attachment.processing_error,
@@ -784,7 +779,7 @@ def retry_failed_evidence_bundle(request, pk):
         if Path(attachment.original_name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}:
             continue
         payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
-        if payload.get("usage") == "item_ocr_preview":
+        if payload.get("usage") == "item_ocr_preview" or payload.get("superseded_by_email_id"):
             continue
         failed.append(attachment)
     if not failed:
@@ -1346,3 +1341,49 @@ def notifications_read(request):
         "notifications": notifications,
         "unread_notifications": 0,
     })
+
+
+def _accessible_emails(user):
+    from .models import InboundEmail
+    if user.is_superuser:
+        return InboundEmail.objects.all()
+    profile = getattr(user, "profile", None)
+    if not profile or not profile.organization.is_active:
+        return InboundEmail.objects.none()
+    policies = accessible_policies(user)
+    qs = InboundEmail.objects.filter(policy__in=policies)
+    if profile.organization.organization_type == "INSURER":
+        return qs
+    return qs.filter(Q(authority__organization=profile.organization) | Q(endorsement__requester_organization=profile.organization)).distinct()
+
+
+@login_required
+def inbound_email_list(request):
+    from django.core.paginator import Paginator
+    emails = _accessible_emails(request.user).select_related("mailbox", "endorsement", "policy")
+    query = request.GET.get("q", "").strip()
+    if query:
+        emails = emails.filter(Q(reference__icontains=query) | Q(sender__icontains=query) | Q(subject__icontains=query))
+    state = request.GET.get("state", "")
+    if state:
+        emails = emails.filter(processing_state=state)
+    from .models import InboundEmail
+    return render(request, "emails/list.html", {"page": Paginator(emails, 30).get_page(request.GET.get("page")), "query": query, "state": state, "states": InboundEmail.State.choices})
+
+
+@login_required
+def inbound_email_detail(request, pk):
+    email = get_object_or_404(_accessible_emails(request.user).select_related("mailbox", "policy", "endorsement", "thread", "authority"), pk=pk)
+    if request.method == "POST":
+        if not request.user.is_staff or (email.endorsement_id and not can_insurer_operate(request.user, email.endorsement)):
+            raise PermissionDenied("Only authorized staff can retry email processing.")
+        from .email_intake import deliver_reply, process_email
+        if request.POST.get("action") == "retry_delivery":
+            reply = getattr(email, "reply", None)
+            if reply:
+                deliver_reply(reply.pk)
+        else:
+            process_email(email.pk, force=True)
+        messages.success(request, "Email authorization and processing rechecked.")
+        return redirect("inbound_email_detail", pk=email.pk)
+    return render(request, "emails/detail.html", {"email": email, "payload_json": json.dumps(email.extracted_payload, indent=2, ensure_ascii=False), "can_retry": request.user.is_staff and (not email.endorsement_id or can_insurer_operate(request.user, email.endorsement))})

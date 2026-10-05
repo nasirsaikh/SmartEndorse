@@ -2,6 +2,7 @@ import base64
 import json
 import io
 import mimetypes
+import os
 import re
 from datetime import date as dt_date
 from pathlib import Path
@@ -110,8 +111,8 @@ class AIService:
         if exclude_pk:
             qs = qs.exclude(pk=exclude_pk)
         return (
-            qs.filter(supports_vision=False).order_by("-updated_at", "-pk").first()
-            or qs.order_by("-updated_at", "-pk").first()
+            qs.filter(supports_vision=False).order_by("priority", "-updated_at", "-pk").first()
+            or qs.order_by("priority", "-updated_at", "-pk").first()
         )
 
     @staticmethod
@@ -121,7 +122,7 @@ class AIService:
             qs = qs.exclude(pk=exclude_pk)
         if exclude_glm_ocr:
             qs = qs.exclude(model_name__icontains="glm-ocr")
-        return qs.order_by("-updated_at", "-pk").first()
+        return qs.order_by("priority", "-updated_at", "-pk").first()
 
     @property
     def available(self):
@@ -879,13 +880,53 @@ class AIService:
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
-        if self.config.api_key:
-            if self.config.provider == AIProviderConfig.Provider.ANTHROPIC:
-                headers.update({"x-api-key": self.config.api_key, "anthropic-version": "2023-06-01"})
-            else:
-                headers["Authorization"] = f"Bearer {self.config.api_key}"
+        key = self.config.api_key
+        if self.config.secret_reference:
+            key = os.getenv(self.config.secret_reference, "")
+            if not key:
+                raise RuntimeError(f"API credential environment variable {self.config.secret_reference} is not set.")
+        if self.config.provider == AIProviderConfig.Provider.ANTHROPIC:
+            headers["anthropic-version"] = "2023-06-01"
+            if key:
+                headers["x-api-key"] = key
+        elif key:
+            headers["Authorization"] = f"Bearer {key}"
         headers.update((self.config.options or {}).get("headers", {}))
         return headers
+
+    def _api_url(self, endpoint):
+        base = self._base_url()
+        if base.endswith(endpoint):
+            return base
+        if base.endswith("/v1") and endpoint.startswith("/v1/"):
+            return base + endpoint[3:]
+        return base + endpoint
+
+    def _model_name(self):
+        model = self.config.model_name
+        provider = (self.config.inference_provider or "").strip()
+        if self.config.provider == AIProviderConfig.Provider.HUGGINGFACE and provider and provider != "auto" and ":" not in model:
+            return f"{model}:{provider}"
+        return model
+
+    def _chat_parameters(self, payload, response_schema=None):
+        options = self.config.options or {}
+        parameters = options.get("request_parameters", {})
+        if not isinstance(parameters, dict):
+            raise ValueError("request_parameters must be a JSON object.")
+        for key, value in parameters.items():
+            if key not in {"model", "messages", "stream", "system"}:
+                if value is None:
+                    payload.pop(key, None)
+                else:
+                    payload[key] = value
+        if self.config.provider not in {AIProviderConfig.Provider.OLLAMA, AIProviderConfig.Provider.ANTHROPIC}:
+            mode = options.get("response_format", "json_object" if self.config.provider == AIProviderConfig.Provider.OPENAI else "")
+            if mode == "json_schema" and response_schema:
+                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "endorsement_members", "schema": response_schema, "strict": False}}
+            elif mode == "json_object":
+                payload["response_format"] = {"type": "json_object"}
+        return payload
 
     def _ollama_runtime_options(self, *, vision=False):
         configured = dict(self.config.options or {})
@@ -893,6 +934,8 @@ class AIService:
         configured.pop("keep_alive", None)
         configured.pop("vision_pipeline", None)
         configured.pop("semantic_model", None)
+        configured.pop("request_parameters", None)
+        configured.pop("response_format", None)
         defaults = {
             "temperature": float(self.config.temperature),
         }
@@ -916,6 +959,8 @@ class AIService:
             return "http://127.0.0.1:11434"
         if self.config.provider == AIProviderConfig.Provider.OPENAI:
             return "https://api.openai.com"
+        if self.config.provider == AIProviderConfig.Provider.HUGGINGFACE:
+            return "https://router.huggingface.co/v1"
         if self.config.provider == AIProviderConfig.Provider.ANTHROPIC:
             return "https://api.anthropic.com"
         raise RuntimeError("base_url is required for OpenAI-compatible providers.")
@@ -930,7 +975,7 @@ class AIService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "stream": False,
                 "messages": messages,
                 "options": self._ollama_runtime_options(vision=False),
@@ -939,9 +984,9 @@ class AIService:
             if response_schema:
                 payload["format"] = response_schema
         elif cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
-            url = base + "/v1/messages"
+            url = self._api_url("/v1/messages")
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "max_tokens": 8192,
                 "temperature": float(cfg.temperature),
                 "messages": [{"role": "user", "content": prompt}],
@@ -949,17 +994,18 @@ class AIService:
             if system_prompt:
                 payload["system"] = system_prompt
         else:
-            url = base + "/v1/chat/completions"
+            url = self._api_url("/v1/chat/completions")
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "temperature": float(cfg.temperature),
                 "messages": messages,
             }
 
+        payload = self._chat_parameters(payload, response_schema)
         with httpx.Client(timeout=cfg.timeout_seconds) as client:
             data = client.post(url, headers=self._headers(), json=payload).raise_for_status().json()
         if cfg.provider == AIProviderConfig.Provider.OLLAMA:
@@ -1030,7 +1076,7 @@ class AIService:
             "do not summarize, and do not return JSON. Output concise OCR text only."
         )
         payload = {
-            "model": cfg.model_name,
+            "model": self._model_name(),
             "stream": False,
             "messages": [{"role": "user", "content": prompt, "images": [encoded]}],
             "options": options,
@@ -1051,7 +1097,7 @@ class AIService:
         base = self._base_url()
         url = base + "/api/generate"
         payload = {
-            "model": cfg.model_name,
+            "model": self._model_name(),
             "stream": False,
             "prompt": (
                 "Text Recognition: Transcribe all visible text from this document faithfully. "
@@ -1075,7 +1121,7 @@ class AIService:
             # Ollama vision models such as BakLLaVA/LLaVA.
             url = base + "/api/generate"
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "stream": False,
                 "prompt": prompt,
                 "images": [encoded],
@@ -1097,9 +1143,9 @@ class AIService:
             return data.get("response", "")
 
         if cfg.provider == AIProviderConfig.Provider.ANTHROPIC:
-            url = base + "/v1/messages"
+            url = self._api_url("/v1/messages")
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "max_tokens": 8192,
                 "messages": [{"role": "user", "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mime, "data": encoded}},
@@ -1109,7 +1155,7 @@ class AIService:
             if system_prompt:
                 payload["system"] = system_prompt
         else:
-            url = base + "/v1/chat/completions"
+            url = self._api_url("/v1/chat/completions")
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
@@ -1118,11 +1164,12 @@ class AIService:
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
             ]})
             payload = {
-                "model": cfg.model_name,
+                "model": self._model_name(),
                 "temperature": float(cfg.temperature),
                 "messages": messages,
             }
 
+        payload = self._chat_parameters(payload, response_schema)
         with httpx.Client(timeout=cfg.timeout_seconds) as client:
             response = client.post(url, headers=self._headers(), json=payload)
             response.raise_for_status()
@@ -1144,6 +1191,19 @@ class AIService:
         return None
 
     @staticmethod
+    def _validated_rows(rows):
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("Every extracted member must be a JSON object.")
+            for key in CANONICAL_FIELDS:
+                value = row.get(key)
+                if value is not None and (isinstance(value, (dict, list, bool)) or not isinstance(value, (str, int, float))):
+                    raise ValueError(f"Invalid value for member field {key}.")
+            if not any(row.get(key) not in (None, "") for key in CANONICAL_FIELDS):
+                raise ValueError("Extracted member has no identifiable member fields.")
+        return rows
+
+    @staticmethod
     def _parse_json_array(content):
         content = (content or "").strip()
         if not content:
@@ -1161,7 +1221,7 @@ class AIService:
             data = json.loads(content)
             rows = AIService._rows_from_json_value(data)
             if rows is not None:
-                return rows
+                return AIService._validated_rows(rows)
         except json.JSONDecodeError:
             pass
 
@@ -1177,7 +1237,7 @@ class AIService:
                 continue
             rows = AIService._rows_from_json_value(data)
             if rows is not None:
-                return rows
+                return AIService._validated_rows(rows)
 
         raise ValueError(
             "AI response did not contain a valid SmartEndorse JSON object/array. "

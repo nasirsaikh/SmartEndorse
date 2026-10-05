@@ -1,8 +1,8 @@
-<div class="space-y-4">
+<div class="glis-stack-4">
   {% if latest_rejection_reason %}
-  <div role="alert" class="alert alert-error">
+  <div role="alert" class="alert alert-danger">
     <i class="bi bi-arrow-return-left"></i>
-    <div><strong>Returned for correction</strong><div class="text-xs">{{ latest_rejection_reason }}</div></div>
+    <div><strong>Returned for correction</strong><div class="glis-text-xs">{{ latest_rejection_reason }}</div></div>
   </div>
   {% endif %}
 
@@ -18,36 +18,36 @@
         <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-shield-check"></i>VALIDATE & SUBMIT</button>
       </form>
     </div>
-    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,.7fr)]">
+    <div class="d-grid gap-4 p-3 se-intake-grid">
       <form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" action="{% url 'endorsement_supplemental_upload' endorsement.pk %}">
         {% csrf_token %}
-        <div class="se-dropzone min-h-[12rem]">
+        <div class="se-dropzone se-min-panel">
           <input class="portal-file-input" data-drop-input="true" type="file" name="attachments" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp">
-          <div class="w-full text-center">
+          <div class="w-100 text-center">
             <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
-            <strong class="font-mono text-xs tracking-wider">DROP FILES</strong>
-            <div class="mt-2 text-[10px] opacity-55">PDF/images selected together are treated as one evidence bundle, including separate front/back ID files.</div>
-            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">BROWSE FILES</button>
-            <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No files selected</div>
+            <strong class="font-monospace glis-text-xs glis-letter-spacing">DROP FILES</strong>
+            <div class="mt-2 se-text-meta opacity-50">PDF/images selected together are treated as one evidence bundle, including separate front/back ID files.</div>
+            <button type="button" data-browse-files class="btn btn-primary btn-sm glis-btn-xs mt-3">BROWSE FILES</button>
+            <div data-file-count class="mt-2 se-text-meta text-uppercase glis-letter-spacing opacity-50">No files selected</div>
           </div>
-          <div class="se-file-list w-full"></div>
+          <div class="se-file-list w-100"></div>
         </div>
-        <div class="mt-3 text-right"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-cloud-check"></i>APPLY FILES</button></div>
+        <div class="mt-3 text-end"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-cloud-check"></i>APPLY FILES</button></div>
       </form>
 
-      <form method="post" action="{% url 'endorsement_item_add' endorsement.pk %}" class="rounded-box border border-base-content/10 bg-base-200/50 p-4">
+      <form method="post" action="{% url 'endorsement_item_add' endorsement.pk %}" class="rounded-3 border border-body bg-body-tertiary p-3">
         {% csrf_token %}
-        <div class="text-xs font-semibold">Add member manually</div>
-        <div class="mt-3 grid gap-2">
+        <div class="glis-text-xs fw-semibold">Add member manually</div>
+        <div class="mt-3 d-grid gap-2">
           <label class="se-field"><span>Full name</span>{{ add_item_form.full_name }}</label>
-          <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Member no.</span>{{ add_item_form.member_no }}</label><label class="se-field"><span>Employee no.</span>{{ add_item_form.employee_no }}</label></div>
+          <div class="d-grid glis-grid-2 gap-2"><label class="se-field"><span>Member no.</span>{{ add_item_form.member_no }}</label><label class="se-field"><span>Employee no.</span>{{ add_item_form.employee_no }}</label></div>
           <label class="se-field"><span>Civil / National ID</span>{{ add_item_form.national_id }}</label>
-          <div class="grid grid-cols-2 gap-2"><label class="se-field"><span>Relationship</span>{{ add_item_form.relationship }}</label><label class="se-field"><span>Gender</span>{{ add_item_form.gender }}</label></div>
+          <div class="d-grid glis-grid-2 gap-2"><label class="se-field"><span>Relationship</span>{{ add_item_form.relationship }}</label><label class="se-field"><span>Gender</span>{{ add_item_form.gender }}</label></div>
           <label class="se-field"><span>Date of birth</span>{{ add_item_form.date_of_birth }}</label>
           <label class="se-field"><span>Plan</span>{{ add_item_form.plan }}</label>
           <label class="se-field"><span>Effective date</span>{{ add_item_form.effective_date }}</label>
         </div>
-        <button class="btn btn-primary btn-sm mt-3 w-full" type="submit"><i class="bi bi-person-plus"></i>ADD MEMBER</button>
+        <button class="btn btn-primary btn-sm mt-3 w-100" type="submit"><i class="bi bi-person-plus"></i>ADD MEMBER</button>
       </form>
     </div>
   </section>
@@ -57,21 +57,21 @@
   <section class="se-panel">
     <div class="se-panel-head">
       <div><div class="se-eyebrow">Changes</div><div class="se-panel-title mt-1">BEFORE → AFTER</div></div>
-      <span class="badge badge-ghost badge-sm">{{ resolution_rows|length }}</span>
+      <span class="badge bg-body-secondary glis-badge-small">{{ resolution_rows|length }}</span>
     </div>
-    <div class="divide-y divide-base-content/10">
+    <div class="glis-divided ">
       {% for row in resolution_rows %}
-      <div class="p-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div><strong class="text-xs">{{ row.description }}</strong>{% if row.actor %}<span class="ml-2 text-[10px] opacity-45">by {{ row.actor.get_full_name|default:row.actor.username }}</span>{% endif %}</div>
-          <span class="font-mono text-[10px] opacity-45">{{ row.created_at|date:"d M Y H:i" }}</span>
+      <div class="p-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <div><strong class="glis-text-xs">{{ row.description }}</strong>{% if row.actor %}<span class="ms-2 se-text-meta opacity-50">by {{ row.actor.get_full_name|default:row.actor.username }}</span>{% endif %}</div>
+          <span class="font-monospace se-text-meta opacity-50">{{ row.created_at|date:"d M Y H:i" }}</span>
         </div>
         <div class="mt-3 overflow-x-auto">
           <table class="se-table">
             <thead><tr><th>Field</th><th>Before</th><th></th><th>After</th></tr></thead>
             <tbody>
             {% for change in row.changes %}
-            <tr><td><strong>{{ change.field }}</strong></td><td class="mono opacity-55">{{ change.before }}</td><td class="w-8 text-center"><i class="bi bi-arrow-right text-primary"></i></td><td class="mono font-semibold">{{ change.after }}</td></tr>
+            <tr><td><strong>{{ change.field }}</strong></td><td class="mono opacity-50">{{ change.before }}</td><td class="glis-w-8 text-center"><i class="bi bi-arrow-right text-primary"></i></td><td class="mono fw-semibold">{{ change.after }}</td></tr>
             {% endfor %}
             </tbody>
           </table>
@@ -93,7 +93,7 @@
         <tr>
           <td><strong>{{ attachment.original_name }}</strong></td>
           <td>{{ attachment.get_kind_display }}{% if attachment.is_supplemental %} · Supplemental{% endif %}</td>
-          <td>{% if attachment.processed %}<span class="se-status se-status-ok">Processed</span>{% else %}<span class="se-status se-status-warn">Exception</span>{% endif %}</td>
+          <td>{% if attachment.extracted_payload.superseded_by_email_id %}<span class="se-status se-status-ok">Resolved by email correction</span>{% elif attachment.processed %}<span class="se-status se-status-ok">Processed</span>{% else %}<span class="se-status se-status-warn">Exception</span>{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>

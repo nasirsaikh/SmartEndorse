@@ -7,53 +7,53 @@
 {% endblock %}
 {% block content %}
 
-<div class="grid grid-cols-2 gap-px bg-base-content/10 lg:grid-cols-6">
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Open</span><i class="bi bi-diagram-3 text-primary"></i></div><div class="se-kpi-value mt-3">{{ pipeline_kpis.open }}</div><div class="se-kpi-delta">active workflow</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Completed</span><i class="bi bi-check2-circle text-success"></i></div><div class="se-kpi-value mt-3 text-success">{{ pipeline_kpis.completed }}</div><div class="se-kpi-delta">{{ pipeline_kpis.total }} total requests</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Needs info</span><i class="bi bi-pencil-square text-warning"></i></div><div class="se-kpi-value mt-3 {% if pipeline_kpis.needs_info %}text-warning{% endif %}">{{ pipeline_kpis.needs_info }}</div><div class="se-kpi-delta">validation / TPA query</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Pending approval</span><i class="bi bi-person-check text-info"></i></div><div class="se-kpi-value mt-3 text-info">{{ pipeline_kpis.pending_approval }}</div><div class="se-kpi-delta">decision queue</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">SLA breached</span><i class="bi bi-activity text-error"></i></div><div class="se-kpi-value mt-3 {% if pipeline_kpis.breached %}text-error{% endif %}">{{ pipeline_kpis.breached }}</div><div class="se-kpi-delta">requires action</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Premium impact</span><i class="bi bi-cash-stack text-primary"></i></div><div class="se-kpi-value mt-3">{{ pipeline_kpis.premium|floatformat:3 }}</div><div class="se-kpi-delta">accessible portfolio</div></div>
+<div class="d-grid glis-grid-2 se-gap-line bg-body-secondary glis-grid-lg-6">
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Open</span><i class="bi bi-diagram-3 text-primary"></i></div><div class="se-kpi-value mt-3">{{ pipeline_kpis.open }}</div><div class="se-kpi-delta">active workflow</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Completed</span><i class="bi bi-check2-circle text-success"></i></div><div class="se-kpi-value mt-3 text-success">{{ pipeline_kpis.completed }}</div><div class="se-kpi-delta">{{ pipeline_kpis.total }} total requests</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Needs info</span><i class="bi bi-pencil-square text-warning"></i></div><div class="se-kpi-value mt-3 {% if pipeline_kpis.needs_info %}text-warning{% endif %}">{{ pipeline_kpis.needs_info }}</div><div class="se-kpi-delta">validation / TPA query</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Pending approval</span><i class="bi bi-person-check text-info"></i></div><div class="se-kpi-value mt-3 text-info">{{ pipeline_kpis.pending_approval }}</div><div class="se-kpi-delta">decision queue</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">SLA breached</span><i class="bi bi-activity text-danger"></i></div><div class="se-kpi-value mt-3 {% if pipeline_kpis.breached %}text-danger{% endif %}">{{ pipeline_kpis.breached }}</div><div class="se-kpi-delta">requires action</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Premium impact</span><i class="bi bi-cash-stack text-primary"></i></div><div class="se-kpi-value mt-3">{{ pipeline_kpis.premium|floatformat:3 }}</div><div class="se-kpi-delta">accessible portfolio</div></div>
 </div>
 
-<section class="se-panel mt-4">
+<section class="se-panel mt-3">
   <div class="se-panel-head">
     <div><div class="se-eyebrow">Filter console</div><div class="se-panel-title mt-1">SEARCH & SEGMENT REQUESTS</div></div>
-    <div class="flex items-center gap-2">
-      {% if q or selected_status or selected_product or selected_type %}<a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-xs">CLEAR</a>{% endif %}
-      <div class="htmx-indicator"><span class="loading loading-spinner loading-xs"></span></div>
+    <div class="d-flex align-items-center gap-2">
+      {% if q or selected_status or selected_product or selected_type %}<a href="{% url 'endorsement_list' %}" class="btn btn-light btn-sm glis-btn-xs">CLEAR</a>{% endif %}
+      <div class="htmx-indicator"><span class="spinner-border  spinner-border-sm"></span></div>
     </div>
   </div>
 
-  <form class="grid gap-3 border-b border-base-content/10 p-4 xl:grid-cols-[minmax(280px,2fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)]"
+  <form class="d-grid gap-3 border-bottom border-body p-3 se-filters-grid"
         hx-get="{% url 'endorsement_list' %}"
         hx-target="#request-table"
         hx-push-url="true"
         hx-trigger="change, keyup changed delay:350ms from:#search-q">
     <label class="form-control">
-      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Search</span></div>
-      <label class="input input-bordered flex items-center gap-2">
-        <i class="bi bi-search opacity-40"></i>
-        <input id="search-q" name="q" value="{{ q }}" class="grow" placeholder="Reference, policy, client, member, Civil ID...">
+      <div class="form-label py-1"><span class=" se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">Search</span></div>
+      <label class="form-control  d-flex align-items-center gap-2">
+        <i class="bi bi-search opacity-50"></i>
+        <input id="search-q" name="q" value="{{ q }}" class="flex-grow-1" placeholder="Reference, policy, client, member, Civil ID...">
       </label>
     </label>
     <label class="form-control">
-      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Status</span></div>
-      <select id="filter-status" name="status" class="select select-bordered w-full">
+      <div class="form-label py-1"><span class=" se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">Status</span></div>
+      <select id="filter-status" name="status" class="form-select  w-100">
         <option value="">All statuses</option>
         {% for value,label in status_choices %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
     <label class="form-control">
-      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Product</span></div>
-      <select id="filter-product" name="product" class="select select-bordered w-full">
+      <div class="form-label py-1"><span class=" se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">Product</span></div>
+      <select id="filter-product" name="product" class="form-select  w-100">
         <option value="">All products</option>
         {% for value,label in product_choices %}<option value="{{ value }}" {% if selected_product == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
     <label class="form-control">
-      <div class="label py-1"><span class="label-text text-[10px] font-bold uppercase tracking-wider opacity-60">Endorsement type</span></div>
-      <select id="filter-type" name="type" class="select select-bordered w-full">
+      <div class="form-label py-1"><span class=" se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">Endorsement type</span></div>
+      <select id="filter-type" name="type" class="form-select  w-100">
         <option value="">All types</option>
         {% for value,label in type_choices %}<option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>

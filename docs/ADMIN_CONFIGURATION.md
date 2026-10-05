@@ -51,3 +51,12 @@ Exception:
 requester -> validation -> needs info or review -> corrected/approved -> re-enter automated path
 
 This preserves zero-touch economics while giving the insurer visibility and override capability.
+
+
+## AI APIs and automated email corrections
+
+AI provider configs now include Hugging Face, API token environment references, routing provider and selection priority. Configure separate active text and vision models; keep the existing extraction prompts/examples.
+
+Mailbox configurations select IMAP/SMTP or Microsoft 365 Graph. Email authorities permit exact email addresses, portal users or Django groups for a specific policy, organization, endorsement types and validity dates. Active portal identities need policy creation access. External senders require an active processing user belonging to the configured organization with policy creation access.
+
+Run `python manage.py process_mailbox --watch --interval 60` as a dedicated worker. Correction replies separate correct/error members, retain the email reference and include an editable CSV. Unsent replies can be retried in Admin; processed inbox messages and sent replies are idempotent. Setup details: [EMAIL_CORRECTIONS.md](EMAIL_CORRECTIONS.md).

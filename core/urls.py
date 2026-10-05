@@ -2,6 +2,8 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("inbound-emails/", views.inbound_email_list, name="inbound_email_list"),
+    path("inbound-emails/<int:pk>/", views.inbound_email_detail, name="inbound_email_detail"),
     path("", views.dashboard, name="dashboard"),
     path("policy-plans/", views.policy_plans, name="policy_plans"),
     path("policy-plans/sum-assured/", views.policy_plan_sum_assured, name="policy_plan_sum_assured"),

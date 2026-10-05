@@ -2,24 +2,24 @@
 {% block title %}New Endorsement | SmartEndorse{% endblock %}
 {% block page_kicker %}SmartEndorse / Pipeline / Create{% endblock %}
 {% block page_title %}NEW ENDORSEMENT{% endblock %}
-{% block object_tools %}<a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO PIPELINE</a>{% endblock %}
+{% block object_tools %}<a href="{% url 'endorsement_list' %}" class="btn btn-light btn-sm"><i class="bi bi-arrow-left"></i>BACK TO PIPELINE</a>{% endblock %}
 {% block content %}
-<div class="alert alert-info mb-4 items-start">
-  <i class="bi bi-signpost-split mt-0.5"></i>
-  <div><strong>Start with either files or manual entry</strong><div class="mt-1 text-xs opacity-65">Upload one or more source files, enter a member manually, or use both. SmartEndorse will create the intake first so you can review extracted rows, correct them, add/remove members, and only then validate and submit.</div></div>
+<div class="alert alert-info mb-3 align-items-start">
+  <i class="bi bi-signpost-split mt-1"></i>
+  <div><strong>Start with either files or manual entry</strong><div class="mt-1 glis-text-xs opacity-75">Upload one or more source files, enter a member manually, or use both. SmartEndorse will create the intake first so you can review extracted rows, correct them, add/remove members, and only then validate and submit.</div></div>
 </div>
-<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="space-y-4">
+<form method="post" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="glis-stack-4">
   {% csrf_token %}
   {% if form.non_field_errors %}
-  <div class="alert alert-error"><i class="bi bi-x-octagon"></i><div>{{ form.non_field_errors }}</div></div>
+  <div class="alert alert-danger"><i class="bi bi-x-octagon"></i><div>{{ form.non_field_errors }}</div></div>
   {% endif %}
 
   <section class="se-panel">
     <div class="se-panel-head">
       <div><div class="se-eyebrow">Step 01 / Request control</div><div class="se-panel-title mt-1">POLICY & ENDORSEMENT</div></div>
-      <span class="badge badge-outline badge-sm">REQUIRED</span>
+      <span class="badge border border-body glis-badge-soft glis-badge-small">REQUIRED</span>
     </div>
-    <div class="se-form-grid p-4">
+    <div class="se-form-grid p-3">
       <div class="se-field se-span-6"><label for="id_policy">Policy</label>{{ form.policy }}{{ form.policy.errors }}</div>
       <div class="se-field se-span-3"><label for="id_endorsement_type">Endorsement type</label>{{ form.endorsement_type }}{{ form.endorsement_type.errors }}</div>
       <div class="se-field se-span-3"><label for="id_effective_date">Effective date</label>{{ form.effective_date }}{{ form.effective_date.errors }}</div>
@@ -29,31 +29,31 @@
   <section class="se-panel">
     <div class="se-panel-head">
       <div><div class="se-eyebrow">Step 02A / Source option</div><div class="se-panel-title mt-1">UPLOAD FILES</div></div>
-      <span class="badge badge-primary badge-outline badge-sm">XLSX · XLS · CSV · PDF · IMAGE</span>
+      <span class="badge text-bg-primary border border-body glis-badge-soft glis-badge-small">XLSX · XLS · CSV · PDF · IMAGE</span>
     </div>
-    <div class="p-4">
+    <div class="p-3">
       <div class="se-dropzone">
         {{ form.attachments }}
-        <div class="w-full max-w-2xl text-center">
+        <div class="w-100 glis-max-2xl text-center">
           <div class="se-dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
-          <div class="font-mono text-sm font-bold tracking-wide">DROP SOURCE FILES HERE</div>
-          <div class="mt-2 text-xs opacity-55">or choose one or more files. PDF/images selected together are treated as one evidence bundle, so ID front/back can be separate files.</div>
-          <button type="button" data-browse-files class="btn btn-primary btn-sm mt-4"><i class="bi bi-folder2-open"></i>BROWSE FILES</button>
-          <div data-file-count class="mt-3 text-[10px] uppercase tracking-wider opacity-45">No files selected</div>
+          <div class="font-monospace small fw-bold glis-letter-spacing">DROP SOURCE FILES HERE</div>
+          <div class="mt-2 glis-text-xs opacity-50">or choose one or more files. PDF/images selected together are treated as one evidence bundle, so ID front/back can be separate files.</div>
+          <button type="button" data-browse-files class="btn btn-primary btn-sm mt-3"><i class="bi bi-folder2-open"></i>BROWSE FILES</button>
+          <div data-file-count class="mt-3 se-text-meta text-uppercase glis-letter-spacing opacity-50">No files selected</div>
         </div>
-        <div class="se-file-list w-full"></div>
+        <div class="se-file-list w-100"></div>
       </div>
       {{ form.attachments.errors }}
-      <div class="mt-3 flex gap-2 text-xs opacity-55"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Excel/CSV are parsed as structured rows; PDF/image evidence is OCR'd and semantically combined across files/pages before member extraction.</span></div>
+      <div class="mt-3 d-flex gap-2 glis-text-xs opacity-50"><i class="bi bi-shield-check text-primary"></i><span>Original source data is retained for audit. Excel/CSV are parsed as structured rows; PDF/image evidence is OCR'd and semantically combined across files/pages before member extraction.</span></div>
     </div>
   </section>
 
   <section class="se-panel">
     <div class="se-panel-head">
       <div><div class="se-eyebrow">Step 02B / Manual option</div><div class="se-panel-title mt-1">ENTER MEMBER MANUALLY</div></div>
-      <span class="badge badge-ghost badge-sm">USE ALONE OR WITH FILES</span>
+      <span class="badge bg-body-secondary glis-badge-small">USE ALONE OR WITH FILES</span>
     </div>
-    <div class="se-form-grid p-4">
+    <div class="se-form-grid p-3">
       <div class="se-field se-span-6"><label for="id_full_name">Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
       <div class="se-field se-span-3"><label for="id_member_no">Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
       <div class="se-field se-span-3"><label for="id_employee_no">Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
@@ -67,16 +67,16 @@
     </div>
   </section>
 
-  <div class="se-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-    <div class="flex items-start gap-3 text-xs opacity-65">
-      <i class="bi bi-lock-fill mt-0.5 text-primary"></i>
+  <div class="se-panel d-flex flex-column gap-3 p-3 flex-sm-row align-items-sm-center justify-content-sm-between">
+    <div class="d-flex align-items-start gap-3 glis-text-xs opacity-75">
+      <i class="bi bi-lock-fill mt-1 text-primary"></i>
       <span>This screen only creates the intake. Validation, pricing and routing happen after you review the extracted/manual member rows on the next page.</span>
     </div>
-    <div class="flex shrink-0 gap-2">
-      <a href="{% url 'endorsement_list' %}" class="btn btn-ghost">CANCEL</a>
+    <div class="d-flex flex-shrink-0 gap-2">
+      <a href="{% url 'endorsement_list' %}" class="btn btn-light">CANCEL</a>
       <button class="btn btn-primary" type="submit">
         <span class="btn-label"><i class="bi bi-arrow-right-circle"></i>CREATE INTAKE & REVIEW</span>
-        <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+        <span class="spinner-border  spinner-border-sm d-none btn-spinner"></span>
       </button>
     </div>
   </div>

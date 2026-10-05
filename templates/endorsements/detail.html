@@ -3,29 +3,29 @@
 {% block page_kicker %}SmartEndorse / Pipeline / {{ endorsement.reference }}{% endblock %}
 {% block page_title %}{{ endorsement.reference }}{% endblock %}
 {% block object_tools %}
-  <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>PIPELINE</a>
-  <a href="?step=completion#audit-trail" class="btn btn-ghost btn-sm"><i class="bi bi-clock-history"></i>AUDIT</a>
+  <a href="{% url 'endorsement_list' %}" class="btn btn-light btn-sm"><i class="bi bi-arrow-left"></i>PIPELINE</a>
+  <a href="?step=completion#audit-trail" class="btn btn-light btn-sm"><i class="bi bi-clock-history"></i>AUDIT</a>
 {% endblock %}
 {% block content %}
 
-<section class="se-panel mb-4">
-  <div class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
-    <div class="min-w-0">
-      <div class="flex flex-wrap items-center gap-2">
+<section class="se-panel mb-3">
+  <div class="d-flex flex-column gap-3 p-3 flex-lg-row align-items-lg-center justify-content-lg-between">
+    <div class="glis-min-width-0">
+      <div class="d-flex flex-wrap align-items-center gap-2">
         <span class="se-status se-status-{{ endorsement.status|lower }}">{{ endorsement.get_status_display }}</span>
         {% if endorsement.sla_breached %}<span class="se-status se-status-error">SLA breached</span>{% endif %}
       </div>
-      <h2 class="mt-2 truncate font-mono text-lg font-semibold tracking-wide">{{ endorsement.policy.policy_number }} · {{ endorsement.policy.policy_name }}</h2>
-      <div class="mt-1 text-xs opacity-55">{{ endorsement.get_endorsement_type_display }} · {{ endorsement.effective_date|date:"d M Y" }} · {{ endorsement.policy.client.name }}</div>
+      <h2 class="mt-2 text-truncate font-monospace fs-5 fw-semibold glis-letter-spacing">{{ endorsement.policy.policy_number }} · {{ endorsement.policy.policy_name }}</h2>
+      <div class="mt-1 glis-text-xs opacity-50">{{ endorsement.get_endorsement_type_display }} · {{ endorsement.effective_date|date:"d M Y" }} · {{ endorsement.policy.client.name }}</div>
     </div>
-    <div class="shrink-0 lg:text-right">
+    <div class="flex-shrink-0 text-lg-end">
       <div class="se-eyebrow">Premium impact</div>
-      <div class="mt-1 font-mono text-xl font-semibold">{{ endorsement.currency }} {{ endorsement.premium_impact|floatformat:3 }}</div>
+      <div class="mt-1 font-monospace fs-4 fw-semibold">{{ endorsement.currency }} {{ endorsement.premium_impact|floatformat:3 }}</div>
     </div>
   </div>
 </section>
 
-<section class="se-workflow-shell mb-4" id="workflow-wizard">
+<section class="se-workflow-shell mb-3" id="workflow-wizard">
   <div class="se-workflow-scroll">
     <div class="se-workflow-wizard">
       {% for step in wizard_steps %}
@@ -36,7 +36,7 @@
           <span class="se-workflow-index">
             {% if step.state == "done" %}<i class="bi bi-check-lg"></i>{% else %}{{ forloop.counter }}{% endif %}
           </span>
-          <div class="min-w-0">
+          <div class="glis-min-width-0">
             <div class="se-workflow-name">{{ step.label }}</div>
             <div class="se-workflow-state">
               {% if step.key == "completion" and endorsement.status == "COMPLETED" %}COMPLETED{% elif step.state == "active" %}CURRENT{% elif step.state == "done" %}DONE{% elif step.state == "returned" %}RETURNED{% else %}PENDING{% endif %}
@@ -50,7 +50,7 @@
           </div>
           <div>
             <span>{{ step.tat_label|upper }}</span>
-            <strong class="{% if step.breached %}text-error{% elif step.actual_hours != None %}text-success{% endif %}">{% if step.actual_hours != None %}{{ step.actual_hours }}h{% else %}—{% endif %}</strong>
+            <strong class="{% if step.breached %}text-danger{% elif step.actual_hours != None %}text-success{% endif %}">{% if step.actual_hours != None %}{{ step.actual_hours }}h{% else %}—{% endif %}</strong>
           </div>
         </div>
         {% if step.breached %}<div class="se-workflow-breach"><i class="bi bi-exclamation-triangle"></i> TAT BREACHED</div>{% endif %}
@@ -60,10 +60,10 @@
   </div>
 </section>
 
-<section id="workflow-stage" class="scroll-mt-24">
+<section id="workflow-stage" class="se-scroll-target">
   {% if selected_step != current_step %}
-  <div class="mb-3 flex justify-end">
-    <a class="btn btn-primary btn-outline btn-xs" href="?step={{ current_step }}#workflow-stage"><i class="bi bi-crosshair"></i>GO TO CURRENT STEP</a>
+  <div class="mb-3 d-flex justify-content-end">
+    <a class="btn btn-primary se-outline btn-sm glis-btn-xs" href="?step={{ current_step }}#workflow-stage"><i class="bi bi-crosshair"></i>GO TO CURRENT STEP</a>
   </div>
   {% endif %}
 
@@ -82,23 +82,23 @@
   {% include "endorsements/partials/_wizard_navigation.html" %}
 </section>
 
-<section class="se-panel mt-4" id="audit-trail">
+<section class="se-panel mt-3" id="audit-trail">
   <details>
-    <summary class="se-panel-head cursor-pointer list-none">
+    <summary class="se-panel-head glis-cursor-pointer list-unstyled">
       <div><div class="se-eyebrow">Immutable operational history</div><div class="se-panel-title mt-1">COMPLETE AUDIT TRAIL</div></div>
       <i class="bi bi-clock-history text-primary"></i>
     </summary>
-    <div class="se-timeline border-t border-base-content/10">
+    <div class="se-timeline border-top border-body">
       {% for event in endorsement.events.all %}
       <div class="se-timeline-item">
-        <div class="font-mono text-[10px] opacity-45">{{ event.created_at|date:"d M Y H:i:s" }}<div>{% if event.actor %}{{ event.actor.username }}{% else %}AUTOMATION{% endif %}</div></div>
+        <div class="font-monospace se-text-meta opacity-50">{{ event.created_at|date:"d M Y H:i:s" }}<div>{% if event.actor %}{{ event.actor.username }}{% else %}AUTOMATION{% endif %}</div></div>
         <div>
-          <strong class="text-xs">{{ event.description|default:event.event_type }}</strong>
-          {% if event.from_status or event.to_status %}<div class="mt-1 font-mono text-[10px] opacity-45">{{ event.from_status|default:"—" }} → {{ event.to_status|default:"—" }}</div>{% endif %}
-          {% if event.payload %}<details class="mt-2"><summary class="cursor-pointer text-[10px] uppercase tracking-wider opacity-50">Event data</summary><pre class="se-json mt-2">{{ event.payload }}</pre></details>{% endif %}
+          <strong class="glis-text-xs">{{ event.description|default:event.event_type }}</strong>
+          {% if event.from_status or event.to_status %}<div class="mt-1 font-monospace se-text-meta opacity-50">{{ event.from_status|default:"—" }} → {{ event.to_status|default:"—" }}</div>{% endif %}
+          {% if event.payload %}<details class="mt-2"><summary class="glis-cursor-pointer se-text-meta text-uppercase glis-letter-spacing opacity-50">Event data</summary><pre class="se-json mt-2">{{ event.payload }}</pre></details>{% endif %}
         </div>
       </div>
-      {% empty %}<div class="p-6 text-center text-xs opacity-45">No workflow events.</div>{% endfor %}
+      {% empty %}<div class="p-4 text-center glis-text-xs opacity-50">No workflow events.</div>{% endfor %}
     </div>
   </details>
 </section>

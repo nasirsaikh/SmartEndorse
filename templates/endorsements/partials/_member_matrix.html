@@ -5,7 +5,7 @@
       <div class="se-eyebrow">Normalized records</div>
       <div class="se-panel-title mt-1">MEMBER MATRIX</div>
     </div>
-    <span class="badge badge-ghost badge-sm">{{ item_kpis.total }} ROW{{ item_kpis.total|pluralize|upper }}</span>
+    <span class="badge bg-body-secondary glis-badge-small">{{ item_kpis.total }} ROW{{ item_kpis.total|pluralize|upper }}</span>
   </div>
   <div class="overflow-x-auto">
     <table class="se-table">
@@ -20,23 +20,23 @@
         <tr>
           <td>
             <span class="se-status se-status-{{ item.validation_status|lower }}">{{ item.get_validation_status_display }}</span>
-            {% if item.is_existing_record %}<span class="ml-2 text-[10px] font-bold text-warning">EXISTING</span>{% endif %}
+            {% if item.is_existing_record %}<span class="ms-2 se-text-meta fw-bold text-warning">EXISTING</span>{% endif %}
           </td>
           <td>
-            <strong class="text-xs">{{ item.full_name|default:"—" }}</strong>
-            <span class="ml-2 text-[10px] opacity-45">{{ item.member_no|default:item.employee_no|default:item.national_id|default:"No identifier" }}</span>
+            <strong class="glis-text-xs">{{ item.full_name|default:"—" }}</strong>
+            <span class="ms-2 se-text-meta opacity-50">{{ item.member_no|default:item.employee_no|default:item.national_id|default:"No identifier" }}</span>
           </td>
           <td>
             {{ item.relationship|default:"—" }}
-            {% if item.plan %}<span class="ml-2 text-[10px] opacity-45">{{ item.plan.code }} · {{ item.plan.name }}</span>{% endif %}
+            {% if item.plan %}<span class="ms-2 se-text-meta opacity-50">{{ item.plan.code }} · {{ item.plan.name }}</span>{% endif %}
           </td>
           <td class="mono">{{ item.effective_date|default:endorsement.effective_date|date:"d M Y" }}</td>
           <td class="mono">{{ item.card_number|default:"—" }}</td>
           <td class="mono">{{ item.tpa_effective_date|date:"d M Y"|default:"—" }}</td>
           <td class="num mono">
             {% if item.tpa_premium_amount != None and item.tpa_premium_amount != item.premium_impact %}
-              <span class="opacity-45 line-through">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</span>
-              <i class="bi bi-arrow-right mx-1 opacity-40"></i>
+              <span class="opacity-50 text-decoration-line-through">{{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}</span>
+              <i class="bi bi-arrow-right mx-1 opacity-50"></i>
               <strong class="text-warning">{{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}</strong>
             {% elif item.tpa_premium_amount != None %}
               {{ endorsement.currency }} {{ item.tpa_premium_amount|floatformat:3 }}
@@ -44,49 +44,42 @@
               {{ endorsement.currency }} {{ item.premium_impact|floatformat:3 }}
             {% endif %}
           </td>
-          <td class="whitespace-nowrap">
-            <button class="btn btn-ghost btn-xs" type="button" onclick="document.getElementById('source-json-{{ item.pk }}').showModal()"><i class="bi bi-braces"></i>SOURCE</button>
+          <td class="text-nowrap">
+            <button class="btn btn-light btn-sm glis-btn-xs" type="button" data-bs-toggle="modal" data-bs-target="#source-json-{{ item.pk }}"><i class="bi bi-braces"></i>SOURCE</button>
             {% if allow_member_edit and can_edit %}
-              <a class="btn btn-ghost btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>
+              <a class="btn btn-light btn-sm glis-btn-xs" href="{% url 'endorsement_item_edit' endorsement.pk item.pk %}"><i class="bi bi-pencil-square"></i>EDIT</a>
               {% if can_delete_items %}
-              <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="inline" onsubmit="return confirm('Delete this member row from the intake/correction?');">
+              <form method="post" action="{% url 'endorsement_item_delete' endorsement.pk item.pk %}" class="d-inline" onsubmit="return confirm('Delete this member row from the intake/correction?');">
                 {% csrf_token %}
-                <button class="btn btn-error btn-ghost btn-xs" type="submit"><i class="bi bi-trash3"></i>DELETE</button>
+                <button class="btn btn-danger btn-light btn-sm glis-btn-xs" type="submit"><i class="bi bi-trash3"></i>DELETE</button>
               </form>
               {% endif %}
             {% endif %}
-            <dialog id="source-json-{{ item.pk }}" class="modal">
-              <div class="modal-box max-w-3xl">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <div class="se-eyebrow">Source data</div>
-                    <h3 class="mt-1 font-mono text-sm font-bold">{{ item.full_name|default:item.member_no|default:"Member" }}</h3>
-                  </div>
-                  <form method="dialog"><button class="btn btn-sm btn-circle btn-ghost">✕</button></form>
-                </div>
-                <pre class="se-json mt-4 max-h-[65vh]">{{ item.source_json }}</pre>
-                <div class="modal-action"><form method="dialog"><button class="btn btn-sm">CLOSE</button></form></div>
-              </div>
-              <form method="dialog" class="modal-backdrop"><button>close</button></form>
-            </dialog>
+            <div id="source-json-{{ item.pk }}" class="modal fade se-member-modal" tabindex="-1" aria-labelledby="source-title-{{ item.pk }}" aria-hidden="true">
+              <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+                <div class="modal-header"><h3 id="source-title-{{ item.pk }}" class="modal-title">{{ item.full_name|default:item.member_no|default:"Member" }} · Source data</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+                <div class="modal-body"><pre class="se-json">{{ item.source_json }}</pre></div>
+                <div class="modal-footer"><button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Close</button></div>
+              </div></div>
+            </div>
           </td>
         </tr>
         {% if show_tpa_controls and can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
         <tr>
-          <td colspan="8" class="bg-info/5">
-            <form class="grid gap-3 md:grid-cols-[1.4fr_1.2fr_1.4fr_auto] md:items-end" method="post" action="{% url 'endorsement_tpa_item' endorsement.pk item.pk %}">
+          <td colspan="8" class="bg-info-subtle">
+            <form class="d-grid gap-3 se-tpa-form-grid align-items-md-end" method="post" action="{% url 'endorsement_tpa_item' endorsement.pk item.pk %}">
               {% csrf_token %}
-              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA card number *</span><input class="input input-bordered w-full" name="card_number" value="{{ item.card_number }}" required></label>
-              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA effective date *</span><input class="input input-bordered w-full" type="date" name="effective_date" value="{% if item.tpa_effective_date %}{{ item.tpa_effective_date|date:'Y-m-d' }}{% elif item.effective_date %}{{ item.effective_date|date:'Y-m-d' }}{% else %}{{ endorsement.effective_date|date:'Y-m-d' }}{% endif %}" required></label>
-              <label class="se-field"><span class="mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60">TPA premium / refund amount *</span><input class="input input-bordered w-full" type="number" step="0.001" name="amount" value="{% if item.tpa_premium_amount != None %}{{ item.tpa_premium_amount }}{% else %}{{ item.premium_impact }}{% endif %}" required></label>
-              <button class="btn btn-info" type="submit"><span class="btn-label">SAVE TPA DATA</span><span class="loading loading-spinner loading-xs hidden btn-spinner"></span></button>
+              <label class="se-field"><span class="mb-1 d-block se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">TPA card number *</span><input class="form-control  w-100" name="card_number" value="{{ item.card_number }}" required></label>
+              <label class="se-field"><span class="mb-1 d-block se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">TPA effective date *</span><input class="form-control  w-100" type="date" name="effective_date" value="{% if item.tpa_effective_date %}{{ item.tpa_effective_date|date:'Y-m-d' }}{% elif item.effective_date %}{{ item.effective_date|date:'Y-m-d' }}{% else %}{{ endorsement.effective_date|date:'Y-m-d' }}{% endif %}" required></label>
+              <label class="se-field"><span class="mb-1 d-block se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">TPA premium / refund amount *</span><input class="form-control  w-100" type="number" step="0.001" name="amount" value="{% if item.tpa_premium_amount != None %}{{ item.tpa_premium_amount }}{% else %}{{ item.premium_impact }}{% endif %}" required></label>
+              <button class="btn btn-info" type="submit"><span class="btn-label">SAVE TPA DATA</span><span class="spinner-border  spinner-border-sm d-none btn-spinner"></span></button>
             </form>
-            <div class="mt-2 text-[10px] opacity-50">A TPA amount different from the system amount raises the configured approval and preserves the before/after audit.</div>
+            <div class="mt-2 se-text-meta opacity-50">A TPA amount different from the system amount raises the configured approval and preserves the before/after audit.</div>
           </td>
         </tr>
         {% endif %}
       {% empty %}
-        <tr><td colspan="8" class="py-12 text-center opacity-50">No member records are available.</td></tr>
+        <tr><td colspan="8" class="py-5 text-center opacity-50">No member records are available.</td></tr>
       {% endfor %}
       </tbody>
     </table>

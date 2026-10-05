@@ -15,6 +15,9 @@ services:
 
   web:
     build: .
+    env_file:
+      - path: .env
+        required: false
     command: sh -c "python manage.py migrate && python manage.py seed_demo && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
     ports:
       - "8000:8000"
@@ -23,10 +26,30 @@ services:
       DJANGO_DEBUG: "1"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
       DATABASE_URL: "postgresql://smartendorse:smartendorse@db:5432/smartendorse"
-      EMAIL_BACKEND: "django.core.mail.backends.console.EmailBackend"
+      EMAIL_BACKEND: "${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - media:/app/media
+
+  mailbox-worker:
+    profiles: ["email"]
+    build: .
+    command: python manage.py process_mailbox --watch --interval 60
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-docker-dev-change-me}"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+      DATABASE_URL: "postgresql://smartendorse:smartendorse@db:5432/smartendorse"
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
     volumes:
       - media:/app/media
 
