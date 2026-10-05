@@ -11,4 +11,3 @@ staticfiles/
 .DS_Store
 .idea/
 .vscode/
-static/css/tailwind.css

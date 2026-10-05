@@ -133,3 +133,10 @@ REST endpoints should become asynchronous outbox messages in production. Recomme
 - reconcile external status daily
 
 This avoids losing a TPA/core request if the remote service is temporarily unavailable.
+
+
+## Reference-based email intake
+
+`process_mailbox` persists MIME messages and attachments before extraction. IMAP UID/UIDVALIDITY or Microsoft Graph delta cursors prevent lost messages on restart. `InboundEmail` carries an immutable email reference; corrections link to the original email and the same endorsement. `EmailAuthority` checks policy, organization, identity/group, date range and transaction type, while trusted receiving-server Authentication-Results establishes sender authentication.
+
+`email_intake.process_email` extracts body/attachments, merges using stable member references or unambiguous identifiers, records changes to accepted/error rows, reruns deterministic validation and pricing, and optionally enters the existing STP/approval workflow. A stored `EmailReply` contains separate correct/error tables and an editable CSV. SMTP retains In-Reply-To/References; Graph creates a native reply draft, changes its subject/body and sends it. The subject carries the original reference. Failed delivery remains pending and is retried without rebuilding an already sent reply.

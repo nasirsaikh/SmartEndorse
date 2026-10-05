@@ -7,9 +7,10 @@ The design follows a zero-touch operating model: structured or unstructured requ
 ## What is included
 
 - Django 5.2 LTS backend with Django Admin as the configuration control plane.
-- Tailwind CSS 4 + daisyUI frontend compiled by `django-tailwind-cli` with no Node.js/npm requirement.
+- Shared compact GLIS Bootstrap 5.3.2 theme, Bootstrap dialogs/tabs and ApexCharts; no frontend build step.
+- Authorized IMAP/Microsoft 365 email intake and reference-based member correction replies.
 - HTMX request filtering and dependent plan selection without a SPA framework.
-- Plotly dashboards for client, insurer and TPA operating views.
+- ApexCharts dashboards for client, insurer and TPA operating views.
 - Organization model covering insurer, direct client, broker, agent, channel partner and TPA.
 - Role model covering insurer admin/manager/supervisor/staff/underwriter, client roles, broker roles, agent, channel partner, TPA roles and auditor.
 - Policy-level access grants so each intermediary sees only mapped policies.
@@ -21,7 +22,7 @@ The design follows a zero-touch operating model: structured or unstructured requ
 - Excel and CSV deterministic extraction.
 - PDF text extraction plus LLM structuring.
 - Image extraction using a vision-capable AI provider.
-- AI provider switch in Admin: Ollama/Llama, OpenAI, Anthropic Claude, or an OpenAI-compatible endpoint.
+- AI provider switch in Admin: Hugging Face, Ollama/Llama, OpenAI, Anthropic Claude, or an OpenAI-compatible endpoint.
 - Straight-through processing controls at platform and policy level.
 - Email or REST integration endpoints for TPA and insurer core systems.
 - SLA due dates, breach visibility and an automated escalation command.
@@ -90,7 +91,7 @@ Windows:
     copy .env.example .env
     python manage.py migrate
     python manage.py seed_demo
-    python manage.py tailwind runserver
+    python manage.py runserver
 
 Linux/macOS:
 
@@ -100,7 +101,7 @@ Linux/macOS:
     cp .env.example .env
     python manage.py migrate
     python manage.py seed_demo
-    python manage.py tailwind runserver
+    python manage.py runserver
 
 Open http://127.0.0.1:8000/
 
@@ -150,27 +151,35 @@ Use Admin > Platform configurations for:
 - email and SLA escalation toggles
 
 ### AI Provider
-Use Admin > AI provider configs. Only one provider is kept active by the custom Admin behavior.
+Use Admin > AI provider configs. Multiple providers may be active. Lower **Priority** values are selected first, with separate selection for text and vision OCR. Keep **Supports vision** disabled for text-only models. Model IDs are configurable; use a model actually served by the API you choose.
 
-Ollama example:
-- Provider: Ollama / Llama
-- Base URL: http://127.0.0.1:11434
-- Model: your installed extraction/vision model
+| Provider | Default base URL | Credential reference |
+| --- | --- | --- |
+| Hugging Face | `https://router.huggingface.co/v1` | e.g. `HF_TOKEN` |
+| OpenAI | `https://api.openai.com` | e.g. `OPENAI_API_KEY` |
+| Anthropic Claude | `https://api.anthropic.com` | e.g. `ANTHROPIC_API_KEY` |
+| Ollama | `http://127.0.0.1:11434` | Leave blank for a local instance |
+| OpenAI-compatible / local | Your server URL, normally ending in `/v1` | The variable your server requires |
 
-OpenAI:
-- Provider: OpenAI
-- Model: configured model name
-- API key: restricted project key
+**Secret reference** is an environment variable name, never the token itself. It takes precedence over the legacy API key field. `.env` is loaded for both the web app and mailbox worker. For Hugging Face, leave **Inference provider** blank/`auto`, choose a routing policy (`fastest`, `cheapest`, `preferred`), or enter a supported provider name. A dedicated compatible endpoint can be configured as a root URL, `/v1`, or `/v1/chat/completions` without duplicating the path.
 
-Anthropic:
-- Provider: Anthropic Claude
-- Model: configured Claude model
-- API key: restricted API key
+Optional API settings in **Options**:
 
-OpenAI-compatible:
-- Set the provider and your compatible base URL.
+```json
+{"request_parameters": {"max_tokens": 4096, "temperature": null}, "response_format": "json_object"}
+```
 
-For production, do not store long-lived secrets in plain database fields. Replace the demo-compatible API-key field with Vault, KMS, Azure Key Vault, AWS Secrets Manager, or another approved secret store.
+A null parameter omits it for models that reject that parameter. `response_format` may be `json_object` or `json_schema` only when supported by the selected model/provider. Member JSON is checked locally; unreadable or malformed results become correction requests. The existing extraction profiles, field aliases and examples continue to apply.
+
+### Email intake and corrections
+
+Configure **Mailbox configurations** and policy-scoped **Email authorities** in Admin, then run:
+
+```bash
+python manage.py process_mailbox --watch --interval 60
+```
+
+Use `--mailbox ID` for one mailbox or omit `--watch` for an externally scheduled one-shot run. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply. SMTP must be configured for IMAP; the default console backend prints messages for development. Microsoft 365 uses Graph replies.
 
 ### Policy configuration
 Each policy controls:
@@ -241,30 +250,16 @@ It records one SLA_BREACH event per breached due timestamp and sends escalation 
 
 For high-volume production, move notification delivery and integrations to a durable queue with idempotency and retries.
 
-## Frontend build
+## Frontend assets
 
-SmartEndorse uses `django-tailwind-cli==4.8.0` to compile Tailwind CSS 4 and daisyUI directly through Django. Node.js, npm, webpack and the browser Tailwind CDN are not required.
+Bootstrap 5.3.2, HTMX, ApexCharts and Bootstrap Icons are bundled locally. `bootstrap-layout.css`, `style.css`, `ui.css` and `portal-compact.css` are shared from GLIS. SmartEndorse-specific wizard, dropzone and responsive page styles are in `static/css/smartendorse.css`. There is no CSS compilation step:
 
-Development server with automatic CSS rebuilds:
+```bash
+python manage.py runserver
+python manage.py collectstatic --noinput
+```
 
-    python manage.py tailwind runserver
-
-If you prefer separate processes:
-
-    python manage.py tailwind watch
-    python manage.py runserver
-
-Production/static build:
-
-    python manage.py tailwind build
-    python manage.py collectstatic --noinput
-
-The editable source stylesheet is `styles/tailwind.css`. The generated stylesheet is `static/css/tailwind.css` and is intentionally not committed. daisyUI is configured with the built-in `light` and `dark` themes, matching the portal theme toggle.
-
-Useful diagnostics:
-
-    python manage.py tailwind config
-    python manage.py tailwind troubleshoot
+The light/dark toggle updates Bootstrap theme variables, charts and the saved profile preference. Dialogs, navigation, dropdowns and action tabs use Bootstrap lifecycle APIs.
 
 ## Docker
 

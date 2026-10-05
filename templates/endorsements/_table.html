@@ -4,15 +4,15 @@
   <tbody>
   {% for item in endorsements %}
     <tr>
-      <td class="mono"><a href="{% url 'endorsement_detail' item.pk %}" class="link link-primary font-semibold no-underline">{{ item.reference }}</a><div class="mt-1 text-[10px] opacity-45">{{ item.created_at|date:"d M Y H:i" }}</div></td>
-      <td><strong class="text-xs">{{ item.policy.policy_number }}</strong><div class="text-[10px] opacity-50">{{ item.policy.client.name }}</div></td>
+      <td class="mono"><a href="{% url 'endorsement_detail' item.pk %}" class=" link-primary fw-semibold text-decoration-none">{{ item.reference }}</a><div class="mt-1 se-text-meta opacity-50">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+      <td><strong class="glis-text-xs">{{ item.policy.policy_number }}</strong><div class="se-text-meta opacity-50">{{ item.policy.client.name }}</div></td>
       <td>{{ item.policy.get_product_display }}</td>
-      <td>{{ item.get_endorsement_type_display }}<div class="text-[10px] opacity-45">{{ item.items.count }} member row{{ item.items.count|pluralize }}</div></td>
+      <td>{{ item.get_endorsement_type_display }}<div class="se-text-meta opacity-50">{{ item.items.count }} member row{{ item.items.count|pluralize }}</div></td>
       <td><span class="se-status se-status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-      <td>{% if item.sla_breached %}<span class="font-semibold text-error">BREACHED</span>{% elif item.current_sla_due_at %}<span class="mono">{{ item.current_sla_due_at|date:"d M Y H:i" }}</span>{% else %}—{% endif %}</td>
+      <td>{% if item.sla_breached %}<span class="fw-semibold text-danger">BREACHED</span>{% elif item.current_sla_due_at %}<span class="mono">{{ item.current_sla_due_at|date:"d M Y H:i" }}</span>{% else %}—{% endif %}</td>
       <td class="num mono">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
     </tr>
-  {% empty %}<tr><td colspan="7" class="py-14 text-center opacity-50"><i class="bi bi-inbox mb-2 block text-2xl"></i>No requests match the filters.</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="7" class="py-5 text-center opacity-50"><i class="bi bi-inbox mb-2 d-block fs-3"></i>No requests match the filters.</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
