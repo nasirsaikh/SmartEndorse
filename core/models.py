@@ -542,6 +542,110 @@ class EndorsementApproval(TimeStampedModel):
         return f"{self.request.reference} / {self.get_approval_type_display()} / {self.get_status_display()}"
 
 
+
+class EmailIntakeMailbox(TimeStampedModel):
+    class Provider(models.TextChoices):
+        MICROSOFT_GRAPH = "MICROSOFT_GRAPH", "Microsoft 365 / Graph"
+        IMAP = "IMAP", "IMAP"
+
+    name = models.CharField(max_length=120, unique=True)
+    email_address = models.EmailField()
+    provider = models.CharField(max_length=30, choices=Provider.choices, default=Provider.MICROSOFT_GRAPH)
+    is_active = models.BooleanField(default=True)
+    auto_submit = models.BooleanField(
+        default=True,
+        help_text="When enabled, successfully extracted email endorsements are immediately validated and routed into the normal workflow.",
+    )
+    mark_as_read = models.BooleanField(default=True)
+    folder = models.CharField(max_length=120, default="Inbox")
+    poll_interval_seconds = models.PositiveIntegerField(default=60)
+    max_messages_per_poll = models.PositiveSmallIntegerField(default=25)
+
+    default_requester = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="default_email_intake_mailboxes",
+        help_text="Fallback requester only when no sender route or matching portal user is available.",
+    )
+
+    imap_host = models.CharField(max_length=255, blank=True)
+    imap_port = models.PositiveIntegerField(default=993)
+    imap_username = models.CharField(max_length=255, blank=True)
+    imap_password = models.TextField(blank=True)
+    imap_use_ssl = models.BooleanField(default=True)
+
+    graph_tenant_id = models.CharField(max_length=120, blank=True)
+    graph_client_id = models.CharField(max_length=120, blank=True)
+    graph_client_secret = models.TextField(blank=True)
+
+    last_polled_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} <{self.email_address}>"
+
+
+class EmailIntakeRoute(TimeStampedModel):
+    mailbox = models.ForeignKey(EmailIntakeMailbox, on_delete=models.CASCADE, related_name="routes")
+    sender_pattern = models.CharField(
+        max_length=255,
+        help_text="Exact sender email or domain pattern such as hr@client.com or @client.com.",
+    )
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name="email_intake_routes")
+    requester = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="email_intake_routes",
+        help_text="Optional fixed requester. If blank, SmartEndorse first matches the sender to an active portal user in this organization.",
+    )
+    default_policy = models.ForeignKey(
+        Policy, on_delete=models.SET_NULL, null=True, blank=True, related_name="email_intake_routes",
+        help_text="Optional fallback policy when the email does not state a policy number.",
+    )
+    default_endorsement_type = models.CharField(
+        max_length=20, choices=[("", "Detect from email"), *EndorsementRequest.Type.choices], blank=True,
+    )
+    priority = models.PositiveSmallIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("-priority", "id")
+
+    def __str__(self):
+        return f"{self.mailbox.name}: {self.sender_pattern} -> {self.organization.code}"
+
+
+class EmailIntakeMessage(TimeStampedModel):
+    class Status(models.TextChoices):
+        RECEIVED = "RECEIVED", "Received"
+        PROCESSING = "PROCESSING", "Processing"
+        PROCESSED = "PROCESSED", "Processed"
+        NEEDS_REVIEW = "NEEDS_REVIEW", "Needs review"
+        FAILED = "FAILED", "Failed"
+        IGNORED = "IGNORED", "Ignored"
+
+    mailbox = models.ForeignKey(EmailIntakeMailbox, on_delete=models.CASCADE, related_name="messages")
+    provider_message_id = models.CharField(max_length=500)
+    internet_message_id = models.CharField(max_length=500, blank=True)
+    sender_email = models.EmailField(blank=True)
+    sender_name = models.CharField(max_length=255, blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    body_text = models.TextField(blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+    request = models.ForeignKey(
+        EndorsementRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="email_intake_messages"
+    )
+    attachment_count = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-received_at", "-created_at")
+        constraints = [
+            models.UniqueConstraint(fields=["mailbox", "provider_message_id"], name="uq_email_intake_provider_message")
+        ]
+
+    def __str__(self):
+        return self.subject or self.internet_message_id or self.provider_message_id
+
+
 class PortalNotification(TimeStampedModel):
     class Level(models.TextChoices):
         INFO = "INFO", "Info"

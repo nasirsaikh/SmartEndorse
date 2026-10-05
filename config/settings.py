@@ -109,3 +109,9 @@ EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "30"))
 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
+
+
+# Inbound endorsement email polling.
+# In DEBUG/runserver it is enabled by default; production can enable it explicitly.
+EMAIL_INTAKE_AUTOSTART = os.getenv("EMAIL_INTAKE_AUTOSTART", "1" if DEBUG else "0") == "1"
+EMAIL_INTAKE_POLL_SECONDS = int(os.getenv("EMAIL_INTAKE_POLL_SECONDS", "30"))
