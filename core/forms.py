@@ -44,18 +44,13 @@ class StyledFormMixin:
     def apply_bootstrap(self):
         for field in self.fields.values():
             existing = field.widget.attrs.get("class", "")
-            classes = [x for x in existing.split() if x not in {
-                "form-control", "form-select", "form-check-input", "vTextField",
-                "input", "select", "textarea", "input-bordered", "select-bordered", "textarea-bordered",
-            }]
+            classes = [x for x in existing.split() if x not in {"form-control", "form-select", "form-check-input", "vTextField"}]
             if isinstance(field.widget, forms.Select):
-                classes.extend(["select", "select-bordered", "w-full"])
+                classes.append("form-select")
             elif isinstance(field.widget, forms.CheckboxInput):
-                classes.extend(["checkbox", "checkbox-sm"])
-            elif isinstance(field.widget, forms.Textarea):
-                classes.extend(["textarea", "textarea-bordered", "w-full"])
+                classes.append("form-check-input")
             elif not isinstance(field.widget, forms.FileInput):
-                classes.extend(["input", "input-bordered", "w-full"])
+                classes.append("form-control")
             field.widget.attrs["class"] = " ".join(dict.fromkeys(classes))
 
 

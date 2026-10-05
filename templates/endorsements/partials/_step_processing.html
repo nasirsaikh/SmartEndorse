@@ -1,10 +1,10 @@
-<div class="space-y-4">
+<div class="glis-stack-4">
   {% if endorsement.status == "TPA_QUERY" and editable_intake %}
-  <div role="alert" class="alert alert-warning items-start">
-    <i class="bi bi-arrow-return-left mt-0.5"></i>
-    <div class="grow">
+  <div role="alert" class="alert alert-warning align-items-start">
+    <i class="bi bi-arrow-return-left mt-1"></i>
+    <div class="flex-grow-1">
       <strong>Correction requested</strong>
-      <div class="mt-1 text-xs">Update the member/file data in Intake, then return here to continue the conversation.</div>
+      <div class="mt-1 glis-text-xs">Update the member/file data in Intake, then return here to continue the conversation.</div>
     </div>
     <a class="btn btn-warning btn-sm" href="?step=intake#workflow-stage">OPEN INTAKE</a>
   </div>
@@ -17,11 +17,11 @@
       <div>
         <div class="se-eyebrow">Help desk</div>
         <div class="se-panel-title mt-1">CASE CONVERSATION</div>
-        {% if endorsement.policy.tpa_id %}<div class="mt-1 text-[10px] opacity-45">{{ endorsement.policy.tpa.name }}</div>{% endif %}
+        {% if endorsement.policy.tpa_id %}<div class="mt-1 se-text-meta opacity-50">{{ endorsement.policy.tpa.name }}</div>{% endif %}
       </div>
-      <div class="flex flex-wrap items-center gap-2">
-        {% if has_open_query %}<span class="badge badge-warning badge-sm">OPEN QUERY</span>{% endif %}
-        {% if pending_amount_approval %}<span class="badge badge-warning badge-sm">AMOUNT APPROVAL</span>{% endif %}
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        {% if has_open_query %}<span class="badge text-bg-warning glis-badge-small">OPEN QUERY</span>{% endif %}
+        {% if pending_amount_approval %}<span class="badge text-bg-warning glis-badge-small">AMOUNT APPROVAL</span>{% endif %}
         {% if endorsement.status == "SENT_TO_TPA" and can_tpa_process %}
         <form method="post" action="{% url 'endorsement_start' endorsement.pk %}">
           {% csrf_token %}
@@ -31,105 +31,84 @@
       </div>
     </div>
 
-    <div class="grid min-h-[30rem] lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <div class="min-w-0 border-b border-base-content/10 bg-base-200/30 lg:border-b-0 lg:border-r">
-        <div class="se-helpdesk-thread max-h-[42rem] overflow-y-auto p-4">
+    <div class="d-grid se-min-conversation se-processing-grid">
+      <div class="glis-min-width-0 border-bottom border-body bg-body-tertiary border-lg-bottom-0 se-border-lg-end">
+        <div class="se-helpdesk-thread se-scroll-log overflow-y-auto p-3">
           {% for message in helpdesk_messages %}
             {% if message.kind == "system" %}
-            <div class="my-4 flex items-center gap-3">
-              <div class="h-px grow bg-base-content/10"></div>
-              <div class="rounded-full border border-base-content/10 bg-base-100 px-3 py-1 text-center text-[9px] font-bold uppercase tracking-wider opacity-60">
+            <div class="my-3 d-flex align-items-center gap-3">
+              <div class="se-rule flex-grow-1 bg-body-secondary"></div>
+              <div class="rounded-pill border border-body bg-body px-3 py-1 text-center se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">
                 {{ message.text }}
-                <span class="ml-2 font-mono opacity-50">{{ message.created_at|date:"d M H:i" }}</span>
+                <span class="ms-2 font-monospace opacity-50">{{ message.created_at|date:"d M H:i" }}</span>
               </div>
-              <div class="h-px grow bg-base-content/10"></div>
+              <div class="se-rule flex-grow-1 bg-body-secondary"></div>
             </div>
             {% else %}
-            <div class="chat {% if message.side == 'end' %}chat-end{% else %}chat-start{% endif %}">
-              <div class="chat-image avatar placeholder">
-                <div class="w-8 rounded-full bg-neutral text-neutral-content">
-                  <span class="text-[10px] font-bold">{{ message.sender|slice:":1"|upper }}</span>
+            <div class="glis-message {% if message.side == 'end' %}glis-message-end{% else %}{% endif %}">
+              <div class="glis-message-avatar glis-avatar ">
+                <div class="glis-w-8 rounded-pill bg-body-secondary text-body">
+                  <span class="se-text-meta fw-bold">{{ message.sender|slice:":1"|upper }}</span>
                 </div>
               </div>
-              <div class="chat-header mb-1 text-[10px]">
+              <div class="glis-message-header mb-1 se-text-meta">
                 <strong>{{ message.sender }}</strong>
-                {% if message.organization %}<span class="ml-1 opacity-50">· {{ message.organization }}</span>{% endif %}
-                <time class="ml-2 font-mono opacity-40">{{ message.created_at|date:"d M H:i" }}</time>
+                {% if message.organization %}<span class="ms-1 opacity-50">· {{ message.organization }}</span>{% endif %}
+                <time class="ms-2 font-monospace opacity-50">{{ message.created_at|date:"d M H:i" }}</time>
               </div>
-              <div class="chat-bubble {% if message.side == 'end' %}chat-bubble-primary{% endif %} max-w-[min(44rem,85vw)]">
-                {% if message.subject %}<div class="mb-1 text-[10px] font-bold uppercase tracking-wider opacity-70">{{ message.subject }}</div>{% endif %}
-                <div class="whitespace-pre-line text-xs leading-5">{{ message.text }}</div>
+              <div class="glis-message-bubble {% if message.side == 'end' %}glis-message-primary{% endif %} se-message-width">
+                {% if message.subject %}<div class="mb-1 se-text-meta fw-bold text-uppercase glis-letter-spacing opacity-75">{{ message.subject }}</div>{% endif %}
+                <div class="se-pre-line glis-text-xs lh-base">{{ message.text }}</div>
               </div>
               {% if message.can_reply and message.query %}
-              <div class="chat-footer mt-2 w-full max-w-[36rem]">
-                <form method="post" action="{% url 'endorsement_query_answer' endorsement.pk message.query.pk %}" class="rounded-box border border-base-content/10 bg-base-100 p-3">
+              <div class="glis-message-footer mt-2 w-100 glis-max-xl">
+                <form method="post" action="{% url 'endorsement_query_answer' endorsement.pk message.query.pk %}" class="rounded-3 border border-body bg-body p-3">
                   {% csrf_token %}
-                  <textarea class="textarea textarea-bordered w-full" name="response" rows="3" placeholder="Type your response…" required></textarea>
-                  <div class="mt-2 flex justify-end"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send"></i>SEND</button></div>
+                  <textarea class="form-control  w-100" name="response" rows="3" placeholder="Type your response…" required></textarea>
+                  <div class="mt-2 d-flex justify-content-end"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send"></i>SEND</button></div>
                 </form>
               </div>
               {% endif %}
             </div>
             {% endif %}
           {% empty %}
-          <div class="grid min-h-[20rem] place-items-center text-center">
+          <div class="d-grid glis-min-height-20rem glis-place-center text-center">
             <div>
-              <i class="bi bi-chat-square-text text-3xl opacity-25"></i>
-              <div class="mt-2 text-xs opacity-50">No conversation yet.</div>
+              <i class="bi bi-chat-square-text fs-2 opacity-25"></i>
+              <div class="mt-2 glis-text-xs opacity-50">No conversation yet.</div>
             </div>
           </div>
           {% endfor %}
         </div>
       </div>
 
-      <aside class="bg-base-100 p-4">
+      <aside class="bg-body p-3">
         {% if endorsement.status != "COMPLETED" and endorsement.status != "CANCELLED" %}
-        <div role="tablist" class="tabs tabs-lift">
-          <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Message" checked>
-          <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
-            <form method="post" action="{% url 'endorsement_processing_message' endorsement.pk %}" class="space-y-3">
-              {% csrf_token %}
-              <textarea class="textarea textarea-bordered w-full" name="message" rows="5" placeholder="Type a message…" required></textarea>
-              <button class="btn btn-primary btn-sm w-full" type="submit"><i class="bi bi-send"></i>SEND MESSAGE</button>
-            </form>
+        <ul class="nav nav-pills mb-3" role="tablist">
+          <li class="nav-item"><button class="nav-link active" type="button" role="tab" data-bs-toggle="tab" data-bs-target="#action-message" aria-controls="action-message" aria-selected="true">Message</button></li>
+          {% if current_step == "processing" and can_tpa_process or current_step == "processing" and can_insurer_operate %}<li class="nav-item"><button class="nav-link" type="button" role="tab" data-bs-toggle="tab" data-bs-target="#action-query" aria-controls="action-query" aria-selected="false">Query</button></li>{% endif %}
+          {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}<li class="nav-item"><button class="nav-link" type="button" role="tab" data-bs-toggle="tab" data-bs-target="#action-reject" aria-controls="action-reject" aria-selected="false">Reject</button></li>{% endif %}
+          {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" or can_insurer_operate and endorsement.status == "CORE_DISPATCHED" %}<li class="nav-item"><button class="nav-link" type="button" role="tab" data-bs-toggle="tab" data-bs-target="#action-complete" aria-controls="action-complete" aria-selected="false">Complete</button></li>{% endif %}
+        </ul>
+        <div class="tab-content">
+          <div id="action-message" role="tabpanel" class="tab-pane fade show active">
+            <form method="post" action="{% url 'endorsement_processing_message' endorsement.pk %}" class="glis-stack-3">{% csrf_token %}<textarea class="form-control" name="message" rows="5" placeholder="Type a message…" required></textarea><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send"></i>Send message</button></form>
           </div>
-
           {% if current_step == "processing" and can_tpa_process or current_step == "processing" and can_insurer_operate %}
-          <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Query">
-          <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
-            <form method="post" action="{% url 'endorsement_query' endorsement.pk %}" class="space-y-3">
-              {% csrf_token %}
-              <div class="se-field"><label>Subject</label>{{ query_form.subject }}</div>
-              <div class="se-field"><label>Message</label>{{ query_form.message }}</div>
-              <button class="btn btn-warning btn-outline btn-sm w-full" type="submit"><i class="bi bi-chat-left-text"></i>RAISE QUERY</button>
-            </form>
-          </div>
-          {% endif %}
-
+          <div id="action-query" role="tabpanel" class="tab-pane fade">
+            <form method="post" action="{% url 'endorsement_query' endorsement.pk %}" class="glis-stack-3">{% csrf_token %}<div class="se-field"><label>Subject</label>{{ query_form.subject }}</div><div class="se-field"><label>Message</label>{{ query_form.message }}</div><button class="btn btn-outline-warning btn-sm" type="submit"><i class="bi bi-chat-left-text"></i>Raise query</button></form>
+          </div>{% endif %}
           {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" %}
-          <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Reject">
-          <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
-            <form method="post" action="{% url 'endorsement_tpa_reject' endorsement.pk %}" class="space-y-3">
-              {% csrf_token %}
-              <textarea class="textarea textarea-bordered w-full" name="reason" rows="4" placeholder="Mandatory rejection reason" required></textarea>
-              <button class="btn btn-error btn-outline btn-sm w-full" type="submit"><i class="bi bi-x-octagon"></i>REJECT & RETURN</button>
-            </form>
-          </div>
-          {% endif %}
-
+          <div id="action-reject" role="tabpanel" class="tab-pane fade">
+            <form method="post" action="{% url 'endorsement_tpa_reject' endorsement.pk %}" class="glis-stack-3">{% csrf_token %}<textarea class="form-control" name="reason" rows="4" placeholder="Mandatory rejection reason" required></textarea><button class="btn btn-outline-danger btn-sm" type="submit"><i class="bi bi-x-octagon"></i>Reject & return</button></form>
+          </div>{% endif %}
           {% if can_tpa_process and endorsement.status == "TPA_IN_PROGRESS" or can_insurer_operate and endorsement.status == "CORE_DISPATCHED" %}
-          <input type="radio" name="processing_action_tabs" role="tab" class="tab" aria-label="Complete">
-          <div role="tabpanel" class="tab-content rounded-box border border-base-content/10 bg-base-100 p-3">
-            <form method="post" action="{% url 'endorsement_complete' endorsement.pk %}" class="space-y-3">
-              {% csrf_token %}
-              <input class="input input-bordered w-full" name="external_reference" placeholder="TPA / core reference">
-              <button class="btn btn-success btn-sm w-full" type="submit"><i class="bi bi-check-circle"></i>{% if can_tpa_process %}APPROVE & COMPLETE{% else %}COMPLETE{% endif %}</button>
-            </form>
-          </div>
-          {% endif %}
+          <div id="action-complete" role="tabpanel" class="tab-pane fade">
+            <form method="post" action="{% url 'endorsement_complete' endorsement.pk %}" class="glis-stack-3">{% csrf_token %}<input class="form-control" name="external_reference" placeholder="TPA / core reference"><button class="btn btn-success btn-sm" type="submit"><i class="bi bi-check-circle"></i>{% if can_tpa_process %}Approve & complete{% else %}Complete{% endif %}</button></form>
+          </div>{% endif %}
         </div>
         {% else %}
-        <div class="text-center text-xs opacity-50">Conversation closed.</div>
+        <div class="text-center glis-text-xs opacity-50">Conversation closed.</div>
         {% endif %}
       </aside>
     </div>

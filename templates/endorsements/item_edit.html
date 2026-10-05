@@ -2,21 +2,21 @@
 {% block title %}Correct Item | {{ endorsement.reference }}{% endblock %}
 {% block page_kicker %}SmartEndorse / {{ endorsement.reference }} / Validation correction{% endblock %}
 {% block page_title %}CORRECT MEMBER ITEM{% endblock %}
-{% block object_tools %}<a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost btn-sm"><i class="bi bi-arrow-left"></i>BACK TO REQUEST</a>{% endblock %}
+{% block object_tools %}<a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-light btn-sm"><i class="bi bi-arrow-left"></i>BACK TO REQUEST</a>{% endblock %}
 {% block content %}
 
 {% if item.validation_errors %}
-<div class="alert alert-warning mb-4 items-start">
-  <i class="bi bi-exclamation-triangle mt-0.5"></i>
+<div class="alert alert-warning mb-3 align-items-start">
+  <i class="bi bi-exclamation-triangle mt-1"></i>
   <div>
     <strong>Current validation errors</strong>
-    <ul class="mt-1 list-disc pl-5 text-xs">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+    <ul class="mt-1 glis-list-disc ps-4 glis-text-xs">{% for err in item.validation_errors %}<li>{{ err }}</li>{% endfor %}</ul>
   </div>
 </div>
 {% endif %}
 
-<div class="grid gap-4 xl:grid-cols-[minmax(0,2.2fr)_minmax(320px,.8fr)]">
-  <form method="post" class="space-y-4">
+<div class="d-grid gap-4 se-approval-grid">
+  <form method="post" class="glis-stack-4">
     {% csrf_token %}
     <section class="se-panel">
       <div class="se-panel-head">
@@ -25,13 +25,13 @@
       </div>
 
       {% if ocr_source %}
-      <div class="border-b border-success/30 bg-success/5 px-4 py-3 text-xs">
-        <i class="bi bi-stars mr-1 text-success"></i>
+      <div class="border-bottom border-success-subtle bg-success-subtle px-3 py-3 glis-text-xs">
+        <i class="bi bi-stars me-1 text-success"></i>
         Values extracted from <strong>{{ ocr_source }}</strong> are shown below for review. Nothing is saved until you click <strong>SAVE CORRECTION</strong>.
       </div>
       {% endif %}
 
-      <div class="se-form-grid p-4">
+      <div class="se-form-grid p-3">
         <div class="se-field se-span-6"><label>Full name</label>{{ form.full_name }}{{ form.full_name.errors }}</div>
         <div class="se-field se-span-3"><label>Member no.</label>{{ form.member_no }}{{ form.member_no.errors }}</div>
         <div class="se-field se-span-3"><label>Employee no.</label>{{ form.employee_no }}{{ form.employee_no.errors }}</div>
@@ -49,46 +49,46 @@
       </div>
     </section>
 
-    <div class="flex flex-wrap justify-end gap-2">
-      <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-ghost">CANCEL</a>
+    <div class="d-flex flex-wrap justify-content-end gap-2">
+      <a href="{% url 'endorsement_detail' endorsement.pk %}" class="btn btn-light">CANCEL</a>
       <button class="btn btn-primary" type="submit">
         <span class="btn-label"><i class="bi bi-check2-circle"></i>SAVE CORRECTION</span>
-        <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+        <span class="spinner-border  spinner-border-sm d-none btn-spinner"></span>
       </button>
     </div>
   </form>
 
-  <div class="space-y-4">
+  <div class="glis-stack-4">
     <section class="se-panel">
       <div class="se-panel-head">
         <div><div class="se-eyebrow">Image / PDF extraction</div><div class="se-panel-title mt-1">FILL FORM USING OCR</div></div>
         <i class="bi bi-file-earmark-image text-primary"></i>
       </div>
-      <form method="post" enctype="multipart/form-data" class="p-4">
+      <form method="post" enctype="multipart/form-data" class="p-3">
         {% csrf_token %}
         <input type="hidden" name="action" value="ocr_fill">
-        <div class="se-dropzone min-h-[12rem]">
+        <div class="se-dropzone se-min-panel">
           {{ ocr_form.ocr_files }}
-          <div class="w-full text-center">
+          <div class="w-100 text-center">
             <div class="se-dropzone-icon"><i class="bi bi-stars"></i></div>
-            <strong class="font-mono text-xs tracking-wider">DROP FRONT / BACK / PDF EVIDENCE</strong>
-            <div class="mt-2 text-[10px] leading-4 opacity-55">Upload one or more files for the same member. Front and back ID images may be separate files; SmartEndorse combines the evidence before filling the form.</div>
-            <button type="button" data-browse-files class="btn btn-primary btn-xs mt-3">CHOOSE FILES</button>
-            <div data-file-count class="mt-2 text-[9px] uppercase tracking-wider opacity-45">No file selected</div>
+            <strong class="font-monospace glis-text-xs glis-letter-spacing">DROP FRONT / BACK / PDF EVIDENCE</strong>
+            <div class="mt-2 se-text-meta lh-sm opacity-50">Upload one or more files for the same member. Front and back ID images may be separate files; SmartEndorse combines the evidence before filling the form.</div>
+            <button type="button" data-browse-files class="btn btn-primary btn-sm glis-btn-xs mt-3">CHOOSE FILES</button>
+            <div data-file-count class="mt-2 se-text-meta text-uppercase glis-letter-spacing opacity-50">No file selected</div>
           </div>
-          <div class="se-file-list w-full"></div>
+          <div class="se-file-list w-100"></div>
         </div>
         {{ ocr_form.ocr_files.errors }}
-        <button class="btn btn-primary btn-sm mt-3 w-full" type="submit">
+        <button class="btn btn-primary btn-sm mt-3 w-100" type="submit">
           <span class="btn-label"><i class="bi bi-magic"></i>COMBINE EVIDENCE & FILL FORM</span>
-          <span class="loading loading-spinner loading-xs hidden btn-spinner"></span>
+          <span class="spinner-border  spinner-border-sm d-none btn-spinner"></span>
         </button>
       </form>
     </section>
 
     <section class="se-panel">
       <div class="se-panel-head"><div><div class="se-eyebrow">Source evidence</div><div class="se-panel-title mt-1">ORIGINAL EXTRACTION JSON</div></div></div>
-      <div class="p-4"><pre class="se-json">{{ item.extracted_data }}</pre></div>
+      <div class="p-3"><pre class="se-json">{{ item.extracted_data }}</pre></div>
     </section>
   </div>
 </div>

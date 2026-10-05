@@ -1222,7 +1222,7 @@ class ValidationService:
 
         for attachment in request_obj.attachments.exclude(processing_error=""):
             payload = attachment.extracted_payload if isinstance(attachment.extracted_payload, dict) else {}
-            if payload.get("usage") == "item_ocr_preview":
+            if payload.get("usage") == "item_ocr_preview" or payload.get("superseded_by_email_id"):
                 continue
             errors.append(f'Document "{attachment.original_name}" could not be processed: {attachment.processing_error}')
 

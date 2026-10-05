@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ email.reference }} | SmartEndorse{% endblock %}
+{% block page_kicker %}SmartEndorse / Email intake{% endblock %}
+{% block page_title %}{{ email.reference }}{% endblock %}
+{% block object_tools %}<a class="btn btn-light btn-sm" href="{% url 'inbound_email_list' %}">All emails</a>{% if email.endorsement_id %}<a class="btn btn-primary btn-sm" href="{% url 'endorsement_detail' email.endorsement_id %}">Open endorsement</a>{% endif %}{% endblock %}
+{% block content %}
+<div class="d-grid gap-3 se-review-grid">
+  <div class="glis-stack-3">
+    <section class="card"><div class="card-body"><h2 class="card-title">{{ email.subject }}</h2><div class="small text-body-secondary">{{ email.sender }} · {{ email.received_at }} · {{ email.mailbox.name }}</div><div class="badge align-self-start text-bg-secondary">{{ email.get_processing_state_display }}</div>{% if email.thread_id %}<a class="small" href="{% url 'inbound_email_detail' email.thread_id %}">Original email: {{ email.thread.reference }}</a>{% endif %}<pre class="se-email-body">{{ email.body_text }}</pre></div></section>
+    {% if email.processing_error %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i><span class="se-pre-line">{{ email.processing_error }}</span></div>{% endif %}
+    <section class="card"><div class="card-body"><h2 class="card-title">Extraction and corrections</h2><pre class="se-json">{{ payload_json }}</pre></div></section>
+  </div>
+  <div class="glis-stack-3">
+    <section class="card"><div class="card-body"><h2 class="card-title">Source files</h2>{% for evidence in email.evidence.all %}<div class="border-bottom pb-2"><strong class="small">{{ evidence.original_name }}</strong>{% if evidence.attachment.processing_error %}<p class="small text-danger mb-0">{{ evidence.attachment.processing_error }}</p>{% else %}<div class="small text-body-secondary">Retained as source evidence</div>{% endif %}</div>{% empty %}<p class="small text-body-secondary mb-0">Email body only.</p>{% endfor %}</div></section>
+    <section class="card"><div class="card-body"><h2 class="card-title">Reply tracking</h2>{% if email.reply %}<div class="small">{% if email.reply.sent_at %}Sent {{ email.reply.sent_at }}{% else %}Pending delivery{% endif %} · {{ email.reply.attempts }} attempt{{ email.reply.attempts|pluralize }}</div><div class="small text-body-secondary">{{ email.reply.subject }}</div>{% if email.reply.last_error %}<p class="small text-danger">{{ email.reply.last_error }}</p>{% endif %}<details><summary class="small text-primary">View reply</summary><pre class="se-email-body mt-2">{{ email.reply.body_text }}</pre></details>{% else %}<p class="small text-body-secondary">No reply queued.</p>{% endif %}
+    {% if can_retry %}<form method="post" class="d-flex flex-wrap gap-2">{% csrf_token %}<button class="btn btn-primary btn-sm" name="action" value="reprocess">Recheck and process</button>{% if email.reply and not email.reply.sent_at %}<button class="btn btn-light btn-sm" name="action" value="retry_delivery">Retry reply</button>{% endif %}</form>{% endif %}
+    </div></section>
+  </div>
+</div>
+{% endblock %}

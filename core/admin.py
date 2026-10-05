@@ -47,22 +47,22 @@ class PlatformConfigurationAdmin(admin.ModelAdmin):
 @admin.register(AIProviderConfig)
 class AIProviderConfigAdmin(admin.ModelAdmin):
     form = AIProviderAdminForm
-    list_display = ("name", "provider", "model_name", "is_active", "supports_vision", "updated_at")
+    list_display = ("name", "provider", "model_name", "priority", "is_active", "supports_vision", "updated_at")
     list_filter = ("provider", "is_active", "supports_vision")
     search_fields = ("name", "model_name")
     fieldsets = (
-        ("Provider", {"fields": ("name", "provider", "model_name", "base_url", "api_key")}),
+        ("Provider", {"fields": ("name", "provider", "model_name", "base_url", "secret_reference", "api_key", "inference_provider")}),
         ("Capabilities", {
-            "fields": ("is_active", "supports_vision"),
+            "fields": ("is_active", "supports_vision", "priority"),
             "description": (
-                "Multiple providers may be active. SmartEndorse uses a non-vision provider for normal text tasks "
+                "Multiple providers may be active. Lower priority numbers are selected first. SmartEndorse uses a non-vision provider for normal text tasks "
                 "when available, and automatically selects an active Supports vision provider for image/scanned-PDF OCR."
             ),
         }),
         ("Runtime", {
             "fields": ("temperature", "timeout_seconds", "options"),
             "description": (
-                "For Ollama, options may override runtime parameters. If no separate active text provider is configured, "
+                "Hugging Face uses https://router.huggingface.co/v1 when the base URL is blank; use a model served by your chosen inference provider. A dedicated endpoint may end in /v1 or /v1/chat/completions. request_parameters controls model-specific API options; a null value omits a parameter. response_format may be json_object or json_schema when supported. For Ollama, options may override runtime parameters. If no separate active text provider is configured, "
                 "SmartEndorse can auto-discover a local semantic mapper from Ollama /api/tags. "
                 'Use {"semantic_model": "qwen2.5:7b"} to force a specific installed mapper. '
                 "Generic vision OCR defaults to num_ctx=4096; "
@@ -232,3 +232,74 @@ admin.site.register(IntegrationEndpoint)
 admin.site.site_header = "SmartEndorse Administration"
 admin.site.site_title = "SmartEndorse Admin"
 admin.site.index_title = "Automation & Configuration"
+
+
+from .models import EmailAuthority, EmailEvidence, EmailReply, InboundEmail, MailboxConfiguration
+
+
+@admin.register(MailboxConfiguration)
+class MailboxConfigurationAdmin(admin.ModelAdmin):
+    list_display = ("name", "email_address", "transport", "is_active", "auto_submit", "last_sync_at", "last_error")
+    list_filter = ("transport", "is_active", "auto_submit")
+    readonly_fields = ("cursor", "last_sync_at", "last_error")
+    fieldsets = (
+        ("Mailbox", {"fields": ("name", "email_address", "transport", "is_active", "folder", "default_policy", "auto_submit")}),
+        ("IMAP", {"fields": ("imap_host", "imap_port", "imap_username", "credential_reference", "use_oauth")}),
+        ("Microsoft 365", {"fields": ("graph_tenant_id", "graph_client_id", "graph_secret_reference")}),
+        ("Sender verification", {"fields": ("require_sender_authentication", "trusted_authserv_ids")}),
+        ("Polling status", {"fields": ("cursor", "last_sync_at", "last_error")}),
+    )
+
+
+@admin.register(EmailAuthority)
+class EmailAuthorityAdmin(admin.ModelAdmin):
+    list_display = ("name", "policy", "organization", "email_address", "user", "group", "is_active", "valid_until")
+    list_filter = ("is_active", "organization", "policy")
+    search_fields = ("name", "email_address", "user__email", "policy__policy_number")
+    autocomplete_fields = ("policy", "organization", "user", "processing_user", "group")
+
+
+class EmailEvidenceInline(admin.TabularInline):
+    model = EmailEvidence
+    extra = 0
+    readonly_fields = ("original_name", "file", "attachment")
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InboundEmail)
+class InboundEmailAdmin(admin.ModelAdmin):
+    list_display = ("reference", "mailbox", "sender", "subject", "processing_state", "endorsement", "received_at")
+    list_filter = ("processing_state", "mailbox")
+    search_fields = ("reference", "sender", "subject", "endorsement__reference")
+    readonly_fields = tuple(field.name for field in InboundEmail._meta.fields)
+    inlines = (EmailEvidenceInline,)
+    actions = ("retry_intake",)
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.action(description="Recheck authorization and retry email extraction")
+    def retry_intake(self, request, queryset):
+        from .email_intake import process_email
+        for email in queryset:
+            process_email(email.pk, force=True)
+        self.message_user(request, "Selected emails rechecked and processed.")
+
+
+@admin.register(EmailReply)
+class EmailReplyAdmin(admin.ModelAdmin):
+    list_display = ("email", "subject", "sent_at", "attempts", "last_error")
+    readonly_fields = tuple(field.name for field in EmailReply._meta.fields)
+    actions = ("retry_delivery",)
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.action(description="Retry unsent authorized replies")
+    def retry_delivery(self, request, queryset):
+        from .email_intake import deliver_reply
+        sent = sum(deliver_reply(reply.pk) for reply in queryset.filter(sent_at=None))
+        self.message_user(request, f"Delivered {sent} pending reply(s).")

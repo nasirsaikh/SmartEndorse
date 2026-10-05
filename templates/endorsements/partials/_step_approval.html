@@ -1,37 +1,37 @@
-<div class="space-y-4">
+<div class="glis-stack-4">
   {% if latest_rejection_reason %}
-  <div role="alert" class="alert alert-error">
+  <div role="alert" class="alert alert-danger">
     <i class="bi bi-x-octagon"></i>
-    <div><strong>Returned for correction</strong><div class="text-xs">{{ latest_rejection_reason }}</div></div>
+    <div><strong>Returned for correction</strong><div class="glis-text-xs">{{ latest_rejection_reason }}</div></div>
   </div>
   {% endif %}
 
   {% if approvals %}
   <section class="se-panel">
-    <div class="divide-y divide-base-content/10">
+    <div class="glis-divided ">
       {% for approval in approvals %}
-      <div class="p-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="p-3">
+        <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
           <div>
-            <strong class="text-sm">{{ approval.get_approval_type_display }}</strong>
-            <div class="mt-1 text-[11px] opacity-60">{{ approval.reason }}</div>
+            <strong class="small">{{ approval.get_approval_type_display }}</strong>
+            <div class="mt-1 glis-text-xs opacity-75">{{ approval.reason }}</div>
             {% if approval.old_amount != None and approval.new_amount != approval.old_amount %}
-            <div class="mt-2 font-mono text-xs">{{ endorsement.currency }} {{ approval.old_amount|floatformat:3 }} <i class="bi bi-arrow-right mx-1"></i> {{ endorsement.currency }} {{ approval.new_amount|floatformat:3 }}</div>
+            <div class="mt-2 font-monospace glis-text-xs">{{ endorsement.currency }} {{ approval.old_amount|floatformat:3 }} <i class="bi bi-arrow-right mx-1"></i> {{ endorsement.currency }} {{ approval.new_amount|floatformat:3 }}</div>
             {% endif %}
           </div>
           <span class="se-status {% if approval.status == 'APPROVED' %}se-status-ok{% elif approval.status == 'REJECTED' %}se-status-error{% else %}se-status-warn{% endif %}">{{ approval.get_status_display }}</span>
         </div>
 
         {% if approval.decision_comment %}
-        <div class="mt-3 rounded-box bg-base-200 px-3 py-2 text-xs"><strong>Decision note:</strong> {{ approval.decision_comment }}</div>
+        <div class="mt-3 rounded-3 bg-body-tertiary px-3 py-2 glis-text-xs"><strong>Decision note:</strong> {{ approval.decision_comment }}</div>
         {% endif %}
 
         {% if approval.status == "PENDING" and approval.can_decide_for_user %}
-        <form method="post" action="{% url 'endorsement_approval' endorsement.pk approval.pk %}" class="mt-4">
+        <form method="post" action="{% url 'endorsement_approval' endorsement.pk approval.pk %}" class="mt-3">
           {% csrf_token %}
-          <textarea class="textarea textarea-bordered w-full" name="comment" rows="2" placeholder="Approval note / mandatory rejection reason"></textarea>
-          <div class="mt-2 flex justify-end gap-2">
-            <button class="btn btn-error btn-outline btn-sm" type="submit" name="decision" value="reject"><i class="bi bi-x-lg"></i>REJECT</button>
+          <textarea class="form-control  w-100" name="comment" rows="2" placeholder="Approval note / mandatory rejection reason"></textarea>
+          <div class="mt-2 d-flex justify-content-end gap-2">
+            <button class="btn btn-danger se-outline btn-sm" type="submit" name="decision" value="reject"><i class="bi bi-x-lg"></i>REJECT</button>
             <button class="btn btn-success btn-sm" type="submit" name="decision" value="approve"><i class="bi bi-check-lg"></i>APPROVE</button>
           </div>
         </form>

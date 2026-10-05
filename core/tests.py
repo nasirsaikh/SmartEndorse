@@ -45,13 +45,18 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     })
-    def test_authenticated_portal_uses_daisyui_command_center_assets(self):
+    def test_authenticated_portal_uses_shared_glis_bootstrap_assets(self):
         http = Client()
         http.force_login(self.requester)
         response = http.get("/")
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        self.assertIn("/static/css/tailwind.css", html)
+        self.assertIn("/static/css/bootstrap.min.css", html)
+        self.assertIn("/static/css/style.css", html)
+        self.assertIn("/static/js/bootstrap.bundle.min.js", html)
+        self.assertIn("apexcharts", html)
+        self.assertNotIn("tailwind.css", html)
+        self.assertNotIn("plotly", html)
         self.assertNotIn("daisyui@5", html)
         self.assertNotIn("@tailwindcss/browser@4", html)
         self.assertIn("ENDORSEMENT CONTROL", html)
@@ -60,7 +65,7 @@ class PortalFrontendStyleTests(BaseInsuranceTest):
         self.assertNotIn("All services nominal", html)
         self.assertNotIn("tom-select", html.lower())
         self.assertIn('id="theme-toggle"', html)
-        self.assertIn('id="portal-drawer"', html)
+        self.assertIn('id="portal-navigation"', html)
         self.assertNotIn("lg:drawer-open", html)
         self.assertNotIn("/static/admin/css/", html)
         self.assertNotIn("admin-lte", html.lower())
@@ -411,7 +416,9 @@ class PortalValidationUXTests(BaseInsuranceTest):
             {attachment.original_name for attachment in bundle_args},
             {"Faiyz Id Front.jpeg", "Faiyz Id Back.jpeg"},
         )
-        revalidate_mock.assert_called_once()
+        revalidate_mock.assert_not_called()
+        http.post(f"/endorsements/{req.pk}/revalidate/")
+        revalidate_mock.assert_called_once_with(req, self.requester)
 
     @override_settings(STORAGES={
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -505,7 +512,9 @@ class PortalValidationUXTests(BaseInsuranceTest):
         self.assertEqual(response.status_code, 302)
         bundle_args = bundle_mock.call_args.args[0]
         self.assertEqual({attachment.pk for attachment in bundle_args}, {front.pk, back.pk})
-        revalidate_mock.assert_called_once()
+        revalidate_mock.assert_not_called()
+        http.post(f"/endorsements/{req.pk}/revalidate/")
+        revalidate_mock.assert_called_once_with(req, self.requester)
 
     def test_member_validation_error_identifies_member(self):
         req = EndorsementRequest.objects.create(
@@ -663,9 +672,10 @@ class PortalValidationUXTests(BaseInsuranceTest):
         http.force_login(self.requester)
         response = http.get(f"/endorsements/{req.pk}/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "ADD OR UPDATE MEMBER DATA")
+        self.assertContains(response, "FILES OR MANUAL ENTRY")
         self.assertNotContains(response, "BULK CORRECTION")
-        self.assertContains(response, "APPLY & REVALIDATE")
+        self.assertContains(response, "APPLY FILES")
+        self.assertContains(response, "VALIDATE & SUBMIT")
 
 
 class AIExtractionTrainingTests(BaseInsuranceTest):

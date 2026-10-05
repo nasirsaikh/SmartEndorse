@@ -124,6 +124,7 @@ class PlatformConfiguration(TimeStampedModel):
 class AIProviderConfig(TimeStampedModel):
     class Provider(models.TextChoices):
         OLLAMA = "OLLAMA", "Ollama / Llama"
+        HUGGINGFACE = "HUGGINGFACE", "Hugging Face Inference Providers / Endpoint"
         OPENAI = "OPENAI", "OpenAI"
         ANTHROPIC = "ANTHROPIC", "Anthropic Claude"
         OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE", "OpenAI-compatible API"
@@ -133,6 +134,9 @@ class AIProviderConfig(TimeStampedModel):
     model_name = models.CharField(max_length=150)
     base_url = models.URLField(blank=True)
     api_key = models.TextField(blank=True, help_text="For production prefer a secret manager. Admin access to this model should be tightly restricted.")
+    secret_reference = models.CharField(max_length=160, blank=True, help_text="Environment variable containing the API token; takes precedence over API key.")
+    inference_provider = models.CharField(max_length=80, blank=True, help_text="Hugging Face routing provider or policy (e.g. auto, fastest, cheapest, preferred). Leave blank for automatic routing.")
+    priority = models.PositiveSmallIntegerField(default=100, help_text="Lower numbers are selected first. Multiple text and vision providers may be active.")
     temperature = models.DecimalField(max_digits=3, decimal_places=2, default=Decimal("0.00"))
     timeout_seconds = models.PositiveIntegerField(default=120)
     is_active = models.BooleanField(default=False)
@@ -141,6 +145,14 @@ class AIProviderConfig(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.provider}: {self.model_name})"
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if not isinstance(self.options, dict):
+            raise ValidationError({"options": "Options must be a JSON object."})
+        if self.provider == self.Provider.OPENAI_COMPATIBLE and not self.base_url:
+            raise ValidationError({"base_url": "A base URL is required for compatible/local APIs."})
 
 
 class SLAProfile(TimeStampedModel):
@@ -567,3 +579,148 @@ class WorkflowEvent(TimeStampedModel):
 
     def __str__(self):
         return f"{self.request.reference} / {self.event_type}"
+
+
+class MailboxConfiguration(TimeStampedModel):
+    class Transport(models.TextChoices):
+        IMAP = "IMAP", "IMAP / SMTP"
+        GRAPH = "GRAPH", "Microsoft 365 / Graph"
+
+    name = models.CharField(max_length=120, unique=True)
+    email_address = models.EmailField()
+    transport = models.CharField(max_length=12, choices=Transport.choices, default=Transport.IMAP)
+    is_active = models.BooleanField(default=False)
+    imap_host = models.CharField(max_length=200, blank=True)
+    imap_port = models.PositiveIntegerField(default=993)
+    imap_username = models.CharField(max_length=200, blank=True)
+    credential_reference = models.CharField(max_length=160, blank=True, help_text="Environment variable holding the IMAP password or OAuth access token.")
+    use_oauth = models.BooleanField(default=False)
+    folder = models.CharField(max_length=100, default="INBOX")
+    graph_tenant_id = models.CharField(max_length=120, blank=True)
+    graph_client_id = models.CharField(max_length=120, blank=True)
+    graph_secret_reference = models.CharField(max_length=160, blank=True)
+    default_policy = models.ForeignKey(Policy, null=True, blank=True, on_delete=models.SET_NULL)
+    auto_submit = models.BooleanField(default=False, help_text="After successful validation, continue through the existing approval/STP workflow.")
+    require_sender_authentication = models.BooleanField(default=True, help_text="Require an aligned DMARC pass from a configured trusted Authentication-Results server before applying email data.")
+    trusted_authserv_ids = models.JSONField(default=list, blank=True, help_text="Exact authserv-id names of your receiving mail servers. Ignore Authentication-Results from any other server.")
+    cursor = models.JSONField(default=dict, blank=True, editable=False)
+    last_sync_at = models.DateTimeField(null=True, blank=True, editable=False)
+    last_error = models.TextField(blank=True, editable=False)
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        errors = {}
+        if self.transport == self.Transport.IMAP and not self.imap_host:
+            errors["imap_host"] = "IMAP host is required."
+        if self.transport == self.Transport.GRAPH and not all((self.graph_tenant_id, self.graph_client_id, self.graph_secret_reference)):
+            errors["graph_client_id"] = "Tenant, client ID and client secret reference are required for Graph."
+        if not isinstance(self.trusted_authserv_ids, list) or any(not isinstance(x, str) for x in self.trusted_authserv_ids):
+            errors["trusted_authserv_ids"] = "Use a JSON array of mail server names."
+        elif self.is_active and self.require_sender_authentication and not self.trusted_authserv_ids:
+            errors["trusted_authserv_ids"] = "Configure your receiving server IDs before enabling sender authentication."
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.name} / {self.email_address}"
+
+
+class EmailAuthority(TimeStampedModel):
+    name = models.CharField(max_length=120)
+    policy = models.ForeignKey(Policy, on_delete=models.CASCADE, related_name="email_authorities")
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    email_address = models.EmailField(blank=True, help_text="An exact sender address. Alternatively select a portal user or authorized group.")
+    user = models.ForeignKey(User, on_delete=models.PROTECT, null=True, blank=True, related_name="email_authorities")
+    group = models.ForeignKey("auth.Group", on_delete=models.PROTECT, null=True, blank=True, help_text="Active portal members of this group may submit replies for this policy.")
+    processing_user = models.ForeignKey(User, on_delete=models.PROTECT, null=True, blank=True, related_name="processed_email_authorities", help_text="Required for external email addresses without a matching portal user. Used for workflow attribution.")
+    permitted_types = models.JSONField(default=list, blank=True, help_text='Allowed types: ["ADDITION", "DELETION"]. Empty permits both.')
+    valid_from = models.DateField(null=True, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if sum(bool(x) for x in (self.email_address, self.user_id, self.group_id)) != 1:
+            raise ValidationError("Select exactly one sender identity: email address, portal user or group.")
+        if not isinstance(self.permitted_types, list) or any(x not in EndorsementRequest.Type.values for x in self.permitted_types):
+            raise ValidationError({"permitted_types": "Use ADDITION and/or DELETION in a JSON array."})
+        if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
+            raise ValidationError({"valid_until": "Must be on or after valid from."})
+
+    def __str__(self):
+        return self.name
+
+
+class InboundEmail(TimeStampedModel):
+    class State(models.TextChoices):
+        RECEIVED = "RECEIVED", "Received"
+        NEEDS_INFO = "NEEDS_INFO", "Awaiting correction"
+        PROCESSED = "PROCESSED", "Processed"
+        UNAUTHORIZED = "UNAUTHORIZED", "Unauthorized sender"
+        NEEDS_REVIEW = "NEEDS_REVIEW", "Needs review"
+        IGNORED = "IGNORED", "Ignored automatic reply"
+
+    reference = models.CharField(max_length=32, unique=True, editable=False)
+    mailbox = models.ForeignKey(MailboxConfiguration, on_delete=models.PROTECT, related_name="messages")
+    message_uid = models.CharField(max_length=512)
+    message_id = models.CharField(max_length=512, blank=True)
+    in_reply_to = models.CharField(max_length=512, blank=True)
+    references_header = models.TextField(blank=True)
+    sender = models.EmailField()
+    subject = models.CharField(max_length=998)
+    body_text = models.TextField(blank=True)
+    received_at = models.DateTimeField(default=timezone.now)
+    headers = models.JSONField(default=dict, blank=True)
+    raw_message = models.FileField(upload_to="inbound/%Y/%m/", blank=True)
+    thread = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="corrections")
+    policy = models.ForeignKey(Policy, on_delete=models.PROTECT, null=True, blank=True)
+    endorsement = models.ForeignKey(EndorsementRequest, on_delete=models.PROTECT, null=True, blank=True, related_name="inbound_emails")
+    authority = models.ForeignKey(EmailAuthority, on_delete=models.SET_NULL, null=True, blank=True)
+    processing_state = models.CharField(max_length=20, choices=State.choices, default=State.RECEIVED)
+    processing_error = models.TextField(blank=True)
+    extracted_payload = models.JSONField(default=dict, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-received_at", "-pk")
+        constraints = [
+            models.UniqueConstraint(fields=["mailbox", "message_uid"], name="uq_mailbox_message_uid"),
+            models.UniqueConstraint(fields=["mailbox", "message_id"], condition=~models.Q(message_id=""), name="uq_mailbox_message_id"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"EML-{timezone.now():%Y%m}-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+
+    @property
+    def thread_reference(self):
+        return self.thread.reference if self.thread_id else self.reference
+
+    def __str__(self):
+        return f"{self.reference} / {self.subject}"
+
+
+class EmailEvidence(TimeStampedModel):
+    email = models.ForeignKey(InboundEmail, on_delete=models.CASCADE, related_name="evidence")
+    file = models.FileField(upload_to="inbound/evidence/%Y/%m/")
+    original_name = models.CharField(max_length=255)
+    attachment = models.ForeignKey(Attachment, on_delete=models.SET_NULL, null=True, blank=True)
+
+
+class EmailReply(TimeStampedModel):
+    email = models.OneToOneField(InboundEmail, on_delete=models.PROTECT, related_name="reply")
+    subject = models.CharField(max_length=998)
+    body_text = models.TextField()
+    body_html = models.TextField()
+    correction_csv = models.TextField(blank=True)
+    message_id = models.CharField(max_length=255)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    graph_draft_id = models.CharField(max_length=512, blank=True)
+
+    def __str__(self):
+        return self.subject

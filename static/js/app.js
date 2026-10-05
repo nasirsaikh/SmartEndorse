@@ -1,4 +1,9 @@
 (() => {
+  if (window.__smartEndorseAppReady) {
+    window.initSmartEndorseUI?.(document);
+    return;
+  }
+  window.__smartEndorseAppReady = true;
   const getCookie = (name) =>
     document.cookie.split(";").map(v => v.trim()).find(v => v.startsWith(name + "="))
       ?.split("=").slice(1).join("=") || "";
@@ -39,11 +44,11 @@
       const row = document.createElement("div");
       row.className = "se-file-row";
       row.innerHTML = `
-        <div class="min-w-0">
+        <div class="glis-min-width-0">
           <div class="se-file-row-name"></div>
           <div class="se-file-row-meta"></div>
         </div>
-        <button type="button" class="btn btn-error btn-ghost btn-xs" aria-label="Remove file">
+        <button type="button" class="btn btn-danger btn-light glis-btn-xs" aria-label="Remove file">
           <i class="bi bi-x-lg"></i>
         </button>`;
       row.querySelector(".se-file-row-name").textContent = file.name;
@@ -154,12 +159,12 @@
     if (!button || button.dataset.loadingActive === "1") return;
     button.dataset.loadingActive = "1";
     button.disabled = true;
-    button.classList.add("btn-disabled");
-    button.querySelector(".btn-label")?.classList.add("opacity-60");
-    button.querySelector(".btn-spinner")?.classList.remove("hidden");
+    button.classList.add("disabled");
+    button.querySelector(".btn-label")?.classList.add("opacity-75");
+    button.querySelector(".btn-spinner")?.classList.remove("d-none");
     if (!button.querySelector(".btn-spinner")) {
       button.dataset.originalHtml = button.innerHTML;
-      button.innerHTML = '<span class="loading loading-spinner loading-xs"></span><span>Processing…</span>';
+      button.innerHTML = '<span class="spinner-border spinner-border-sm"></span><span>Processing…</span>';
     }
   }
 
@@ -167,9 +172,9 @@
     if (!button || button.dataset.loadingActive !== "1") return;
     if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
     button.disabled = false;
-    button.classList.remove("btn-disabled");
-    button.querySelector(".btn-label")?.classList.remove("opacity-60");
-    button.querySelector(".btn-spinner")?.classList.add("hidden");
+    button.classList.remove("disabled");
+    button.querySelector(".btn-label")?.classList.remove("opacity-75");
+    button.querySelector(".btn-spinner")?.classList.add("d-none");
     delete button.dataset.loadingActive;
     delete button.dataset.originalHtml;
   }
@@ -178,15 +183,15 @@
     const host = document.getElementById("toast-container");
     if (!host) return;
     const item = document.createElement("div");
-    const alertClass = level === "error" ? "alert-error" : level === "warning" ? "alert-warning" : level === "info" ? "alert-info" : "alert-success";
+    const alertClass = level === "error" ? "alert-danger" : level === "warning" ? "alert-warning" : level === "info" ? "alert-info" : "alert-success";
     item.className = `alert ${alertClass}`;
     const wrapper = document.createElement("div");
     const strong = document.createElement("strong");
     const text = document.createElement("span");
     strong.textContent = title;
     text.textContent = message;
-    wrapper.className = "grid gap-0.5";
-    text.className = "text-xs";
+    wrapper.className = "d-grid gap-1";
+    text.className = "glis-text-xs";
     wrapper.append(strong, text);
     item.appendChild(wrapper);
     host.appendChild(item);
@@ -202,17 +207,18 @@
   function applyTheme(choice) {
     const theme = resolveTheme(choice);
     document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.setAttribute("data-bs-theme", theme);
     document.documentElement.dataset.themePreference = choice;
     localStorage.setItem("smartendorse-color-mode", choice);
     updateThemeIcon();
-    syncPlotlyTheme();
+    syncChartTheme();
   }
 
   function updateThemeIcon() {
     const icon = document.getElementById("theme-toggle-icon");
     if (!icon) return;
     const dark = document.documentElement.getAttribute("data-theme") === "dark";
-    icon.className = dark ? "bi bi-sun text-lg" : "bi bi-moon-stars text-lg";
+    icon.className = dark ? "bi bi-sun fs-5" : "bi bi-moon-stars fs-5";
   }
 
   async function toggleTheme() {
@@ -236,24 +242,34 @@
     }
   }
 
-  function syncPlotlyTheme() {
-    if (!window.Plotly) return;
-    const dark = document.documentElement.getAttribute("data-theme") === "dark";
-    const text = dark ? "#d7fbea" : "#17302a";
-    const grid = dark ? "rgba(117,255,207,.10)" : "rgba(10,75,60,.10)";
-    document.querySelectorAll(".plotly-graph-div").forEach(plot => {
-      try {
-        Plotly.relayout(plot, {
-          "paper_bgcolor": "rgba(0,0,0,0)",
-          "plot_bgcolor": "rgba(0,0,0,0)",
-          "font.color": text,
-          "xaxis.gridcolor": grid,
-          "yaxis.gridcolor": grid,
-          "xaxis.zerolinecolor": grid,
-          "yaxis.zerolinecolor": grid
-        });
-      } catch (_) {}
+  function chartTheme() {
+    return document.documentElement.getAttribute("data-bs-theme") === "dark" ? "dark" : "light";
+  }
+
+  function initCharts(root = document) {
+    if (!window.ApexCharts) return;
+    root.querySelectorAll?.("[data-chart-config]").forEach(host => {
+      if (host._chart) return;
+      const source = document.getElementById(host.dataset.chartConfig);
+      if (!source) return;
+      const data = JSON.parse(source.textContent);
+      const maximum = Math.max(1, ...data.series.flatMap(series => series.data));
+      const chart = new ApexCharts(host, {
+        chart: {type: data.type, height: 280, toolbar: {show: false}, background: "transparent", fontFamily: "inherit"},
+        theme: {mode: chartTheme()}, colors: ["#2563eb"], series: data.series,
+        xaxis: {categories: data.categories}, stroke: {width: data.type === "line" ? 2 : 0},
+        markers: {size: data.type === "line" ? 4 : 0},
+        yaxis: {min: 0, max: maximum, tickAmount: Math.min(maximum, 5), labels: {formatter: value => Math.round(value).toLocaleString()}},
+        dataLabels: {enabled: false}, noData: {text: "No endorsements yet"},
+        plotOptions: {bar: {borderRadius: 4, columnWidth: "50%"}}, grid: {borderColor: chartTheme() === "dark" ? "#333" : "#e2e4e9"},
+      });
+      host._chart = chart;
+      chart.render();
     });
+  }
+
+  function syncChartTheme() {
+    document.querySelectorAll("[data-chart-config]").forEach(host => host._chart?.updateOptions({theme: {mode: chartTheme()}, grid: {borderColor: chartTheme() === "dark" ? "#333" : "#e2e4e9"}}));
   }
 
   window.enableBrowserNotifications = async () => {
@@ -280,13 +296,6 @@
     });
   }
 
-  function resizePlotly() {
-    if (!window.Plotly) return;
-    document.querySelectorAll(".plotly-graph-div").forEach(plot => {
-      try { Plotly.Plots.resize(plot); } catch (_) {}
-    });
-  }
-
   function syncNotificationBadge() {
     const panel = document.getElementById("notification-panel");
     const badge = document.getElementById("notification-badge");
@@ -306,7 +315,7 @@
     if (!button) return;
     const next = document.createElement("span");
     next.id = "notification-badge";
-    next.className = "badge badge-error badge-xs absolute -right-1 -top-1";
+    next.className = "badge text-bg-danger glis-badge-small position-absolute glis-end-1 glis-top-1";
     next.textContent = String(unread);
     button.appendChild(next);
   }
@@ -317,9 +326,10 @@
     notifyNewPortalItems(root);
     updateThemeIcon();
     syncNotificationBadge();
-    setTimeout(() => { syncPlotlyTheme(); resizePlotly(); }, 60);
-    setTimeout(resizePlotly, 250);
+    initCharts(root);
   }
+
+  window.initSmartEndorseUI = initialize;
 
   document.addEventListener("submit", event => {
     event.target._submitter = event.submitter;
@@ -342,9 +352,19 @@
     );
   });
   document.addEventListener("htmx:afterSwap", event => initialize(event.detail.target || document));
-  document.addEventListener("htmx:afterSettle", () => setTimeout(resizePlotly, 40));
+  document.addEventListener("htmx:beforeCleanupElement", event => {
+    event.detail.elt.querySelectorAll?.("[data-chart-config]").forEach(host => host._chart?.destroy());
+    const modal = event.detail.elt.matches?.(".modal") ? event.detail.elt : null;
+    if (modal) bootstrap.Modal.getInstance(modal)?.dispose();
+  });
 
   document.addEventListener("click", event => {
+    if (event.target.closest("#sidebar-toggle")) {
+      const mini = document.body.classList.toggle("se-sidebar-mini");
+      const button = document.getElementById("sidebar-toggle");
+      button.setAttribute("aria-expanded", String(!mini));
+      button.setAttribute("aria-label", mini ? "Expand navigation" : "Collapse navigation");
+    }
     if (event.target.closest("#theme-toggle")) {
       event.preventDefault();
       toggleTheme();
@@ -355,11 +375,8 @@
     const saved = localStorage.getItem("smartendorse-color-mode");
     if (saved && ["light", "dark", "auto"].includes(saved)) applyTheme(saved);
     initialize(document);
-    document.querySelectorAll(".drawer-side a").forEach(link => {
-      link.addEventListener("click", () => {
-        const drawer = document.getElementById("portal-drawer");
-        if (drawer) drawer.checked = false;
-      });
+    document.querySelectorAll("#portal-sidebar a").forEach(link => {
+      link.addEventListener("click", () => bootstrap.Offcanvas.getInstance(document.getElementById("portal-navigation"))?.hide());
     });
   });
 
@@ -367,5 +384,3 @@
     if ((document.documentElement.dataset.themePreference || "auto") === "auto") applyTheme("auto");
   });
 })();
-
-window.addEventListener("resize", () => { clearTimeout(window.__sePlotResize); window.__sePlotResize = setTimeout(() => { if (window.Plotly) document.querySelectorAll(".plotly-graph-div").forEach(p => { try { Plotly.Plots.resize(p); } catch (_) {} }); }, 120); });

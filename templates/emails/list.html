@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Inbound emails | SmartEndorse{% endblock %}
+{% block page_kicker %}SmartEndorse / Email intake{% endblock %}
+{% block page_title %}Inbound emails{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+  <form class="d-flex flex-wrap gap-2" method="get"><input class="form-control se-email-search" type="search" name="q" value="{{ query }}" placeholder="Reference, sender or subject" aria-label="Search inbound emails"><select class="form-select se-email-filter" name="state" aria-label="Processing state"><option value="">All states</option>{% for value,label in states %}<option value="{{ value }}" {% if state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="btn btn-primary" type="submit">Filter</button></form>
+  <div class="table-responsive"><table class="table table-hover"><thead><tr><th>Reference</th><th>Sender / subject</th><th>Policy</th><th>Status</th><th>Endorsement</th><th>Received</th></tr></thead><tbody>
+  {% for email in page %}<tr><td><a href="{% url 'inbound_email_detail' email.pk %}">{{ email.reference }}</a></td><td><strong>{{ email.sender }}</strong><div class="small text-body-secondary">{{ email.subject|truncatechars:100 }}</div></td><td>{{ email.policy.policy_number|default:"—" }}</td><td><span class="badge {% if email.processing_state == 'PROCESSED' %}text-bg-success{% elif email.processing_state == 'UNAUTHORIZED' %}text-bg-danger{% else %}text-bg-warning{% endif %}">{{ email.get_processing_state_display }}</span></td><td>{% if email.endorsement_id %}<a href="{% url 'endorsement_detail' email.endorsement_id %}">{{ email.endorsement.reference }}</a>{% else %}—{% endif %}</td><td class="small text-nowrap">{{ email.received_at|date:"d M Y H:i" }}</td></tr>{% empty %}<tr><td colspan="6" class="text-center py-4 text-body-secondary">No inbound emails in your policy scope.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="d-flex justify-content-between align-items-center small"><span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span><div class="btn-group">{% if page.has_previous %}<a class="btn btn-light btn-sm" href="?page={{ page.previous_page_number }}&amp;q={{ query|urlencode }}&amp;state={{ state|urlencode }}">Previous</a>{% endif %}{% if page.has_next %}<a class="btn btn-light btn-sm" href="?page={{ page.next_page_number }}&amp;q={{ query|urlencode }}&amp;state={{ state|urlencode }}">Next</a>{% endif %}</div></div>
+</div></div>
+{% endblock %}

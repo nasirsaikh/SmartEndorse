@@ -1,0 +1,88 @@
+/* Compact semantic components shared by every authenticated workflow. */
+.glis-portal-app #portal-main .card-body { gap: .65rem; padding: 1rem; }
+.glis-portal-app #portal-main .glis-field { min-width: 0; padding-block: .15rem; gap: .3rem; }
+.glis-portal-app #portal-main .form-label { padding-block: .2rem; font-size: .75rem; }
+.glis-portal-app #portal-main :is(input.form-control,select.form-select:not([multiple]),.form-control) { min-height: 2.15rem; height: 2.15rem; font-size: .8rem; padding-block: .2rem; }
+.glis-portal-app #portal-main textarea.form-control { min-height: 4.5rem; font-size: .85rem; line-height: 1.5; }
+.glis-portal-app #portal-main .btn:not(.glis-btn-icon):not(.glis-btn-xs) { min-height: 2.2rem; height: auto; padding-block: .4rem; font-size: .8rem; }
+.glis-portal-app #portal-main form .mt-4 { margin-top: 1rem; }
+.glis-portal-app #portal-main form .gap-3 { gap: .65rem; }
+.glis-portal-app #portal-main form label { min-width: 0; }
+.glis-portal-app #portal-main :is(.richtext-editor,.richtext-container,.ck-editor,.ck-editor__main,.ck-content) { width: 100%; min-width: 0; }
+.glis-portal-app .portal-dashboard { gap: .9rem; }
+.glis-portal-app .portal-welcome { min-height: 0; grid-template-columns: minmax(0,1fr) 12rem; border-radius: 1rem; }
+.glis-portal-app .portal-welcome__copy { padding: 1.05rem 1.25rem; }
+.glis-portal-app .portal-welcome__meta { margin-bottom: .55rem; gap: .4rem; }
+.glis-portal-app .portal-welcome h1 { font-size: clamp(1.3rem,2vw,1.8rem); line-height: 1.2; letter-spacing: -.025em; }
+.glis-portal-app .portal-welcome__copy > p { margin: .45rem 0 .7rem; font-size: .8rem; line-height: 1.5; }
+.glis-portal-app .portal-welcome__visual { min-height: 9rem; }
+.glis-portal-app .portal-welcome__signal { padding: .45rem .6rem; bottom: .6rem; inset-inline-end: .6rem; }
+.glis-portal-app .portal-welcome__seal { width: 3.5rem; height: 3.5rem; border-radius: 1rem; font-size: 1.4rem; }
+.glis-portal-app .portal-action { min-height: 2.15rem; padding: .4rem .75rem; font-size: .75rem; }
+.glis-portal-app .portal-chip { min-height: 1.5rem; padding: .2rem .55rem; font-size: .65rem; }
+.glis-portal-app .portal-metrics { gap: .6rem; }
+.glis-portal-app .portal-metric { padding: .75rem .9rem; border-radius: .85rem; }
+.glis-portal-app .portal-metric__icon { width: 1.8rem; height: 1.8rem; border-radius: .55rem; font-size: .8rem; }
+.glis-portal-app .portal-metric__top { gap: .5rem; }
+.glis-portal-app .portal-metric__value { margin-top: .55rem; font-size: 1.55rem; }
+.glis-portal-app .portal-metric__note { margin-top: .3rem; font-size: .65rem; }
+.compact-plan-row { display: grid; grid-template-columns: repeat(4,minmax(6rem,1fr)) auto auto; align-items: end; gap: .65rem; padding: .65rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-tertiary-bg); }
+.compact-plan-row .plan-active { align-self: end; display: flex; align-items: center; min-height: 2.15rem; gap: .35rem; font-size: .75rem; }
+.ticket-conversation { align-self: start; }
+.ticket-conversation .glis-message { min-width: 0; padding-block: .45rem; column-gap: .6rem; }
+.ticket-conversation .glis-message-avatar > div { display: grid; place-items: center; }
+.ticket-conversation .glis-message-bubble { max-width: min(90%,52rem); padding: .7rem .85rem; font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
+.ticket-conversation .glis-message-bubble:not(.glis-message-primary):not(.glis-message-warning) { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border: 1px solid var(--bs-border-color); }
+.ticket-conversation .glis-message-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; font-size: .75rem; padding-bottom: .25rem; }
+.ticket-conversation .glis-message-footer { padding-top: .2rem; font-size: .65rem; }
+.ticket-conversation .rich-content :is(p,ul,ol) { margin-block: .25rem; }
+.ticket-conversation .rich-content img { max-width: 100%; height: auto; border-radius: .6rem; }
+.ticket-conversation .rich-content table { display: block; max-width: 100%; overflow-x: auto; }
+.ticket-conversation #comment-list { max-height: 200vh; overflow-y: auto; overscroll-behavior: contain; padding: .85rem; }
+.ticket-conversation #comment-composer > div { padding: .85rem; }
+.ticket-conversation .composer-options { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.ticket-conversation .composer-options .glis-field { width: 12rem; }
+.ticket-conversation #comment-dropzone { padding: .75rem; border-radius: .75rem; }
+.ticket-conversation .richtext-editor [contenteditable] { min-height: 12rem; max-height: none; resize: vertical; overflow-y: auto; }
+.glis-portal-app #portal-main .richtext-editor .richtext-canvas { min-height: var(--glis-editor-height, 9rem) !important; height: var(--glis-editor-height, 9rem); flex-shrink: 0; }
+.glis-portal-app #portal-main .richtext-editor.is-expanded .richtext-canvas { height: min(65vh, 42rem); }
+.ticket-conversation .richtext-editor:not(.is-expanded) .richtext-canvas { max-height: 200px; }
+.portal-dashboard .portal-metrics { display: flex; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; padding-bottom: .25rem; }
+.portal-dashboard .portal-metric { flex: 1 0 8.5rem; min-width: 0; }
+.portal-dashboard .portal-metric__top { gap: .4rem; }
+.portal-dashboard .portal-metric__label { overflow-wrap: anywhere; }
+.portal-dashboard .portal-metric__value small { font-size: .6em; }
+.dashboard-filter-search { flex: 2 1 12rem; }
+.dashboard-filter-choice { flex: 1 1 10rem; }
+.vanna-workspace { display: flex; min-height: 0; flex-direction: column; height: calc(100dvh - 5rem); }
+.vanna-workspace > section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.vanna-workspace #vanna-conversation { flex: 1; min-height: 0; padding: 1rem clamp(.75rem,3vw,2rem); }
+.vanna-workspace .ai-message { width: min(100%,68rem); margin-inline: auto; }
+.vanna-workspace .ai-answer { display: block; margin-block: .8rem 1.2rem; }
+.vanna-workspace .ai-answer .glis-message-header { margin-bottom: .5rem; }
+.vanna-workspace .vanna-answer-card { width: 100%; border: 1px solid var(--bs-border-color); border-radius: 1rem; background: var(--bs-body-bg); color: var(--bs-body-color); padding: 1rem; box-shadow: 0 4px 18px color-mix(in srgb,var(--bs-body-color) 4%,transparent); }
+.vanna-workspace .vanna-answer-card-error { border-color: var(--bs-danger); }
+.vanna-workspace .vanna-chart { height: 300px; min-width: 0; margin-top: .75rem; }
+.vanna-workspace .vanna-answer-card .glis-message-footer { margin-top: .45rem; }
+.vanna-workspace #vanna-question { min-height: 3rem; max-height: 10rem; }
+.table-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .65rem; background: var(--bs-body-bg); }
+.table-tools .form-control { width: min(100%,18rem); }
+.table-tools .btn-group { display: flex; gap: .3rem; }
+.table-tools [role=status] { font-size: .75rem; opacity: .65; }
+.table-search-empty { padding: 1.25rem; text-align: center; color: var(--bs-body-color); }
+.review-layout { display: grid; gap: .85rem; }
+.review-context { display: grid; gap: .85rem; grid-template-columns: minmax(0,2fr) minmax(0,1fr); }
+.review-grid { display: grid; gap: .65rem; grid-template-columns: repeat(3,minmax(0,1fr)); }
+.review-grid dt { font-size: .7rem; opacity: .6; }
+.review-grid dd { font-size: .85rem; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .glis-portal-app .portal-welcome { grid-template-columns: 1fr; }
+  .glis-portal-app .portal-welcome__visual { display: none; }
+  .compact-plan-row { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .review-context,.review-grid { grid-template-columns: 1fr; }
+  .ticket-conversation .glis-message-bubble { max-width: 95%; }
+}
+
+.glis-portal-app table tr[hidden], .table-search-empty[hidden] { display: none !important; }
+
+.glis-portal-app #portal-main select.form-select[multiple] { min-height: 5rem; height: auto; font-size: .8rem; }

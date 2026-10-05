@@ -3,96 +3,96 @@
 {% block page_kicker %}SmartEndorse / Command / Live overview{% endblock %}
 {% block page_title %}ENDORSEMENT CONTROL{% endblock %}
 {% block object_tools %}
-  <div class="flex items-center gap-2">
-    <span class="badge badge-outline badge-success gap-2 font-mono text-[10px]"><span class="status status-success"></span>LIVE TELEMETRY</span>
+  <div class="d-flex align-items-center gap-2">
+    <span class="badge border border-body glis-badge-soft text-bg-success gap-2 font-monospace se-text-meta"><span class="se-status-dot text-success"></span>LIVE TELEMETRY</span>
     {% if can_create %}<a href="{% url 'endorsement_create' %}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i>NEW ENDORSEMENT</a>{% endif %}
   </div>
 {% endblock %}
 {% block content %}
 
 {% if exceptions %}
-<div role="alert" class="mb-4 flex flex-col gap-3 border border-warning/40 bg-warning/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-  <div class="flex items-start gap-3">
-    <i class="bi bi-exclamation-triangle-fill mt-0.5 text-warning"></i>
-    <div><strong>{{ exceptions }} workflow exception{{ exceptions|pluralize }} require attention</strong><div class="mt-0.5 text-xs opacity-60">Needs-information, approval and failed cases are held out of straight-through processing.</div></div>
+<div role="alert" class="mb-3 d-flex flex-column gap-3 border border-warning-subtle bg-warning-subtle px-3 py-3 small flex-sm-row align-items-sm-center justify-content-sm-between">
+  <div class="d-flex align-items-start gap-3">
+    <i class="bi bi-exclamation-triangle-fill mt-1 text-warning"></i>
+    <div><strong>{{ exceptions }} workflow exception{{ exceptions|pluralize }} require attention</strong><div class="mt-1 glis-text-xs opacity-75">Needs-information, approval and failed cases are held out of straight-through processing.</div></div>
   </div>
-  <a href="{% url 'endorsement_list' %}?status=NEEDS_INFO" class="btn btn-warning btn-xs">OPEN EXCEPTIONS</a>
+  <a href="{% url 'endorsement_list' %}?status=NEEDS_INFO" class="btn btn-warning btn-sm glis-btn-xs">OPEN EXCEPTIONS</a>
 </div>
 {% endif %}
 
-<div class="grid grid-cols-2 gap-px bg-base-content/10 lg:grid-cols-5">
+<div class="d-grid glis-grid-2 se-gap-line bg-body-secondary glis-grid-lg-5">
   <div class="se-kpi">
-    <div class="flex items-center justify-between"><span class="se-kpi-label">Open pipeline</span><i class="bi bi-diagram-3 text-primary"></i></div>
+    <div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Open pipeline</span><i class="bi bi-diagram-3 text-primary"></i></div>
     <div class="se-kpi-value mt-3">{{ open_count }}</div>
     <div class="se-kpi-delta">active requests</div>
   </div>
   <div class="se-kpi">
-    <div class="flex items-center justify-between"><span class="se-kpi-label">Completed</span><i class="bi bi-check2-circle text-success"></i></div>
+    <div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Completed</span><i class="bi bi-check2-circle text-success"></i></div>
     <div class="se-kpi-value mt-3">{{ completed }}</div>
     <div class="se-kpi-delta">{{ completion_rate }}% completion share</div>
   </div>
   <div class="se-kpi">
-    <div class="flex items-center justify-between"><span class="se-kpi-label">STP rate</span><i class="bi bi-lightning-charge text-success"></i></div>
+    <div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">STP rate</span><i class="bi bi-lightning-charge text-success"></i></div>
     <div class="se-kpi-value mt-3 text-success">{{ stp_rate }}%</div>
     <div class="se-kpi-delta">zero-touch eligible</div>
   </div>
   <div class="se-kpi">
-    <div class="flex items-center justify-between"><span class="se-kpi-label">SLA breached</span><i class="bi bi-activity text-error"></i></div>
-    <div class="se-kpi-value mt-3 {% if breached %}text-error{% endif %}">{{ breached }}</div>
+    <div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">SLA breached</span><i class="bi bi-activity text-danger"></i></div>
+    <div class="se-kpi-value mt-3 {% if breached %}text-danger{% endif %}">{{ breached }}</div>
     <div class="se-kpi-delta">active breaches</div>
   </div>
-  <div class="se-kpi col-span-2 lg:col-span-1">
-    <div class="flex items-center justify-between"><span class="se-kpi-label">Premium impact</span><i class="bi bi-cash-stack text-primary"></i></div>
+  <div class="se-kpi glis-span-2 se-span-lg-1">
+    <div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Premium impact</span><i class="bi bi-cash-stack text-primary"></i></div>
     <div class="se-kpi-value mt-3">{{ premium|floatformat:3 }}</div>
     <div class="se-kpi-delta">portfolio total</div>
   </div>
 </div>
 
-<div class="mt-4 grid gap-px bg-base-content/10 sm:grid-cols-2 xl:grid-cols-5">
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Avg total TAT</span><i class="bi bi-stopwatch text-info"></i></div><div class="se-kpi-value mt-3">{{ avg_total_sla_hours }}h</div><div class="se-kpi-delta">completed endorsements</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Due within 24h</span><i class="bi bi-hourglass-split text-warning"></i></div><div class="se-kpi-value mt-3 {% if due_soon %}text-warning{% endif %}">{{ due_soon }}</div><div class="se-kpi-delta">active SLA deadlines</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Insurer review</span><i class="bi bi-shield-check text-warning"></i></div><div class="se-kpi-value mt-3">{{ pending_insurer }}</div><div class="se-kpi-delta">manual approval queue</div></div>
-  <div class="se-kpi"><div class="flex items-center justify-between"><span class="se-kpi-label">Rejected / correction</span><i class="bi bi-arrow-counterclockwise text-error"></i></div><div class="se-kpi-value mt-3 {% if rejected %}text-error{% endif %}">{{ rejected }}</div><div class="se-kpi-delta">awaiting resubmission</div></div>
-  <div class="se-kpi sm:col-span-2 xl:col-span-1"><div class="flex items-center justify-between"><span class="se-kpi-label">Validation quality</span><i class="bi bi-patch-check text-success"></i></div><div class="se-kpi-value mt-3">{{ avg_validation_score }}%</div><div class="se-kpi-delta">average validation score</div></div>
+<div class="mt-3 d-grid se-gap-line bg-body-secondary glis-grid-sm-2 glis-grid-xl-5">
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Avg total TAT</span><i class="bi bi-stopwatch text-info"></i></div><div class="se-kpi-value mt-3">{{ avg_total_sla_hours }}h</div><div class="se-kpi-delta">completed endorsements</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Due within 24h</span><i class="bi bi-hourglass-split text-warning"></i></div><div class="se-kpi-value mt-3 {% if due_soon %}text-warning{% endif %}">{{ due_soon }}</div><div class="se-kpi-delta">active SLA deadlines</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Insurer review</span><i class="bi bi-shield-check text-warning"></i></div><div class="se-kpi-value mt-3">{{ pending_insurer }}</div><div class="se-kpi-delta">manual approval queue</div></div>
+  <div class="se-kpi"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Rejected / correction</span><i class="bi bi-arrow-counterclockwise text-danger"></i></div><div class="se-kpi-value mt-3 {% if rejected %}text-danger{% endif %}">{{ rejected }}</div><div class="se-kpi-delta">awaiting resubmission</div></div>
+  <div class="se-kpi se-span-sm-2 se-span-xl-1"><div class="d-flex align-items-center justify-content-between"><span class="se-kpi-label">Validation quality</span><i class="bi bi-patch-check text-success"></i></div><div class="se-kpi-value mt-3">{{ avg_validation_score }}%</div><div class="se-kpi-delta">average validation score</div></div>
 </div>
 
-<div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,2.2fr)_minmax(300px,.9fr)]">
-  <div class="space-y-4">
+<div class="mt-3 d-grid gap-4 se-dashboard-grid">
+  <div class="glis-stack-4">
     <section class="se-panel">
       <div class="se-panel-head">
         <div><div class="se-eyebrow">Service matrix</div><div class="se-panel-title mt-1">PIPELINE BY STATUS</div></div>
-        <div class="badge badge-ghost badge-sm font-mono text-[10px]">{{ total }} TOTAL</div>
+        <div class="badge bg-body-secondary glis-badge-small font-monospace se-text-meta">{{ total }} TOTAL</div>
       </div>
-      <div class="se-chart-shell p-2 sm:p-3">{{ chart_status|safe }}</div>
+      <div class="se-chart-shell p-2 p-sm-3">{{ chart_status|json_script:"chart-status-data" }}<div data-chart-config="chart-status-data"></div></div>
     </section>
 
     <section class="se-panel">
       <div class="se-panel-head">
         <div><div class="se-eyebrow">Telemetry / six months</div><div class="se-panel-title mt-1">REQUEST VELOCITY</div></div>
-        <div class="join"><span class="join-item btn btn-ghost btn-xs">6M</span><span class="join-item btn btn-ghost btn-xs btn-active">LIVE</span></div>
+        <div class="d-flex"><span class=" btn btn-light btn-sm glis-btn-xs">6M</span><span class=" btn btn-light btn-sm glis-btn-xs active">LIVE</span></div>
       </div>
-      <div class="se-chart-shell p-2 sm:p-3">{{ chart_trend|safe }}</div>
+      <div class="se-chart-shell p-2 p-sm-3">{{ chart_trend|json_script:"chart-trend-data" }}<div data-chart-config="chart-trend-data"></div></div>
     </section>
   </div>
 
-  <div class="space-y-4">
+  <div class="glis-stack-4">
     <section class="se-panel">
       <div class="se-panel-head">
         <div><div class="se-eyebrow">Active incidents</div><div class="se-panel-title mt-1">WATCH DESK</div></div>
-        <span class="badge {% if exceptions %}badge-warning{% else %}badge-success{% endif %} badge-sm">{{ exceptions }} OPEN</span>
+        <span class="badge {% if exceptions %}text-bg-warning{% else %}text-bg-success{% endif %} glis-badge-small">{{ exceptions }} OPEN</span>
       </div>
-      <div class="px-4">
-        <div class="se-watch-item flex items-center justify-between gap-4">
-          <div><div class="text-xs font-semibold">Validation / approval exceptions</div><div class="text-[10px] opacity-50">Blocked from automated routing</div></div>
-          <strong class="font-mono {% if exceptions %}text-warning{% endif %}">{{ exceptions }}</strong>
+      <div class="px-3">
+        <div class="se-watch-item d-flex align-items-center justify-content-between gap-4">
+          <div><div class="glis-text-xs fw-semibold">Validation / approval exceptions</div><div class="se-text-meta opacity-50">Blocked from automated routing</div></div>
+          <strong class="font-monospace {% if exceptions %}text-warning{% endif %}">{{ exceptions }}</strong>
         </div>
-        <div class="se-watch-item flex items-center justify-between gap-4">
-          <div><div class="text-xs font-semibold">TPA work queue</div><div class="text-[10px] opacity-50">Sent, processing or queried</div></div>
-          <strong class="font-mono text-info">{{ tpa_queue }}</strong>
+        <div class="se-watch-item d-flex align-items-center justify-content-between gap-4">
+          <div><div class="glis-text-xs fw-semibold">TPA work queue</div><div class="se-text-meta opacity-50">Sent, processing or queried</div></div>
+          <strong class="font-monospace text-info">{{ tpa_queue }}</strong>
         </div>
-        <div class="se-watch-item flex items-center justify-between gap-4">
-          <div><div class="text-xs font-semibold">SLA breaches</div><div class="text-[10px] opacity-50">Requires operational action</div></div>
-          <strong class="font-mono {% if breached %}text-error{% endif %}">{{ breached }}</strong>
+        <div class="se-watch-item d-flex align-items-center justify-content-between gap-4">
+          <div><div class="glis-text-xs fw-semibold">SLA breaches</div><div class="se-text-meta opacity-50">Requires operational action</div></div>
+          <strong class="font-monospace {% if breached %}text-danger{% endif %}">{{ breached }}</strong>
         </div>
       </div>
     </section>
@@ -102,33 +102,33 @@
         <div><div class="se-eyebrow">Capacity array</div><div class="se-panel-title mt-1">OPERATIONAL LOAD</div></div>
         <i class="bi bi-speedometer2 text-primary"></i>
       </div>
-      <div class="space-y-5 p-4">
+      <div class="glis-stack-5 p-3">
         <div>
-          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>Completed</span><span class="font-mono">{{ completion_rate }}%</span></div>
-          <progress class="progress progress-success w-full" value="{{ completion_rate }}" max="100"></progress>
+          <div class="mb-2 d-flex justify-content-between se-text-meta text-uppercase glis-letter-spacing"><span>Completed</span><span class="font-monospace">{{ completion_rate }}%</span></div>
+          <progress class="se-progress se-progress-success w-100" value="{{ completion_rate }}" max="100"></progress>
         </div>
         <div>
-          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>TPA queue</span><span class="font-mono">{{ tpa_queue_rate }}%</span></div>
-          <progress class="progress progress-info w-full" value="{{ tpa_queue_rate }}" max="100"></progress>
+          <div class="mb-2 d-flex justify-content-between se-text-meta text-uppercase glis-letter-spacing"><span>TPA queue</span><span class="font-monospace">{{ tpa_queue_rate }}%</span></div>
+          <progress class="se-progress se-progress-info w-100" value="{{ tpa_queue_rate }}" max="100"></progress>
         </div>
         <div>
-          <div class="mb-2 flex justify-between text-[10px] uppercase tracking-wider"><span>Exceptions</span><span class="font-mono">{{ exception_rate }}%</span></div>
-          <progress class="progress progress-warning w-full" value="{{ exception_rate }}" max="100"></progress>
+          <div class="mb-2 d-flex justify-content-between se-text-meta text-uppercase glis-letter-spacing"><span>Exceptions</span><span class="font-monospace">{{ exception_rate }}%</span></div>
+          <progress class="se-progress se-progress-warning w-100" value="{{ exception_rate }}" max="100"></progress>
         </div>
-        <div class="grid grid-cols-3 divide-x divide-base-content/10 border-t border-base-content/10 pt-4 text-center">
-          <div><div class="font-mono text-lg font-semibold text-primary">{{ policy_count }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">Policies</div></div>
-          <div><div class="font-mono text-lg font-semibold text-info">{{ tpa_queue }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">TPA queue</div></div>
-          <div><div class="font-mono text-lg font-semibold text-warning">{{ exceptions }}</div><div class="text-[9px] uppercase tracking-wider opacity-50">Exceptions</div></div>
+        <div class="d-grid se-grid-3 se-divide-horizontal  border-top border-body pt-3 text-center">
+          <div><div class="font-monospace fs-5 fw-semibold text-primary">{{ policy_count }}</div><div class="se-text-meta text-uppercase glis-letter-spacing opacity-50">Policies</div></div>
+          <div><div class="font-monospace fs-5 fw-semibold text-info">{{ tpa_queue }}</div><div class="se-text-meta text-uppercase glis-letter-spacing opacity-50">TPA queue</div></div>
+          <div><div class="font-monospace fs-5 fw-semibold text-warning">{{ exceptions }}</div><div class="se-text-meta text-uppercase glis-letter-spacing opacity-50">Exceptions</div></div>
         </div>
       </div>
     </section>
   </div>
 </div>
 
-<section class="se-panel mt-4">
+<section class="se-panel mt-3">
   <div class="se-panel-head">
     <div><div class="se-eyebrow">Live workflow feed</div><div class="se-panel-title mt-1">RECENT ENDORSEMENTS</div></div>
-    <a href="{% url 'endorsement_list' %}" class="btn btn-ghost btn-xs">VIEW ALL <i class="bi bi-arrow-right"></i></a>
+    <a href="{% url 'endorsement_list' %}" class="btn btn-light btn-sm glis-btn-xs">VIEW ALL <i class="bi bi-arrow-right"></i></a>
   </div>
   <div class="overflow-x-auto">
     <table class="se-table">
@@ -136,14 +136,14 @@
       <tbody>
       {% for item in recent %}
       <tr>
-        <td class="mono"><a href="{% url 'endorsement_detail' item.pk %}" class="link link-primary font-semibold no-underline">{{ item.reference }}</a><div class="mt-1 text-[10px] opacity-45">{{ item.created_at|date:"d M Y H:i" }}</div></td>
-        <td><strong class="text-xs">{{ item.policy.policy_number }}</strong><div class="text-[10px] opacity-50">{{ item.policy.client.name }}</div></td>
+        <td class="mono"><a href="{% url 'endorsement_detail' item.pk %}" class=" link-primary fw-semibold text-decoration-none">{{ item.reference }}</a><div class="mt-1 se-text-meta opacity-50">{{ item.created_at|date:"d M Y H:i" }}</div></td>
+        <td><strong class="glis-text-xs">{{ item.policy.policy_number }}</strong><div class="se-text-meta opacity-50">{{ item.policy.client.name }}</div></td>
         <td>{{ item.get_endorsement_type_display }}</td>
         <td><span class="se-status se-status-{{ item.status|lower }}">{{ item.get_status_display }}</span></td>
-        <td>{% if item.sla_breached %}<span class="font-semibold text-error">BREACHED</span>{% elif item.current_sla_due_at %}<span class="font-mono text-xs">{{ item.current_sla_due_at|date:"d M H:i" }}</span>{% else %}—{% endif %}</td>
+        <td>{% if item.sla_breached %}<span class="fw-semibold text-danger">BREACHED</span>{% elif item.current_sla_due_at %}<span class="font-monospace glis-text-xs">{{ item.current_sla_due_at|date:"d M H:i" }}</span>{% else %}—{% endif %}</td>
         <td class="num mono">{{ item.currency }} {{ item.premium_impact|floatformat:3 }}</td>
       </tr>
-      {% empty %}<tr><td colspan="6" class="py-12 text-center opacity-50">No endorsement traffic yet.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="6" class="py-5 text-center opacity-50">No endorsement traffic yet.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

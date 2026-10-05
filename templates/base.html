@@ -1,199 +1,106 @@
-{% load static tailwind_cli %}
+{% load static %}
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-bs-theme="light" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}SmartEndorse{% endblock %}</title>
-
   <script>
     (() => {
       const serverPreference = "{% if current_profile %}{{ current_profile.color_mode }}{% else %}auto{% endif %}";
-      const savedPreference = localStorage.getItem("smartendorse-color-mode");
-      const preference = ["light", "dark", "auto"].includes(savedPreference) ? savedPreference : serverPreference;
-      const resolved = preference === "auto"
-        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-        : preference;
+      let saved;
+      try { saved = localStorage.getItem("smartendorse-color-mode"); } catch (_) {}
+      const preference = ["light", "dark", "auto"].includes(saved) ? saved : serverPreference;
+      const resolved = preference === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : preference;
+      document.documentElement.setAttribute("data-bs-theme", resolved);
       document.documentElement.setAttribute("data-theme", resolved);
       document.documentElement.dataset.themePreference = preference;
     })();
   </script>
-
-  {% tailwind_css %}
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" rel="stylesheet">
-
-  <script src="https://unpkg.com/htmx.org@2.0.7"></script>
-  <script src="https://cdn.plot.ly/plotly-3.1.1.min.js"></script>
+  <link href="{% static 'css/bootstrap.min.css' %}" rel="stylesheet">
+  <link href="{% static 'css/bootstrap-layout.css' %}" rel="stylesheet">
+  <link href="{% static 'css/style.css' %}" rel="stylesheet">
+  <link href="{% static 'css/ui.css' %}" rel="stylesheet">
+  <link href="{% static 'css/portal-compact.css' %}" rel="stylesheet">
+  <link href="{% static 'css/smartendorse.css' %}" rel="stylesheet">
+  <link href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}" rel="stylesheet">
+  <script src="{% static 'vendor/htmx/htmx.min.js' %}"></script>
+  <script src="{% static 'vendor/apexcharts/apexcharts.min.js' %}" defer></script>
+  <script src="{% static 'js/bootstrap.bundle.min.js' %}" defer></script>
+  <script src="{% static 'js/app.js' %}" defer></script>
 </head>
-<body class="min-h-screen bg-base-200 text-base-content" hx-boost="true">
+<body class="glis-portal-app min-vh-100 bg-body-tertiary text-body" hx-boost="true">
 {% if user.is_authenticated %}
-<div class="drawer min-h-screen">
-  <input id="portal-drawer" type="checkbox" class="drawer-toggle">
-
-  <div class="drawer-content flex min-w-0 flex-col">
-    <header class="se-topbar sticky top-0 z-40 border-b border-base-content/10 bg-base-100/95 backdrop-blur">
-      <div class="navbar min-h-14 px-3 lg:px-5">
-        <div class="navbar-start flex-1 gap-2">
-          <label for="portal-drawer" class="btn btn-square btn-ghost btn-sm shrink-0" aria-label="Open navigation" title="Open navigation">
-            <i class="bi bi-layout-sidebar-inset text-lg"></i>
+<a class="glis-skip-link visually-hidden-focusable" href="#portal-main">Skip to content</a>
+<div class="glis-shell">
+  <div class="glis-shell-content min-vh-100 glis-min-width-0">
+    <header class="navbar position-sticky top-0 border-bottom border-body px-3 shadow-sm">
+      <div class="glis-navbar-start glis-min-width-0 gap-2">
+        <button type="button" data-bs-toggle="offcanvas" data-bs-target="#portal-navigation" class="btn btn-light glis-btn-icon d-lg-none" aria-controls="portal-navigation" aria-label="Open navigation"><i class="bi bi-list fs-5"></i></button>
+        <button id="sidebar-toggle" type="button" class="btn btn-light glis-btn-icon d-none d-lg-inline-flex" aria-label="Collapse navigation" aria-expanded="true"><i class="bi bi-layout-sidebar-inset"></i></button>
+        <form method="get" action="{% url 'endorsement_list' %}" class="w-100 glis-max-2xl">
+          <label class="form-control glis-input-shell d-flex align-items-center gap-2 bg-body-tertiary">
+            <i class="bi bi-search text-body-secondary"></i><input type="search" name="q" placeholder="Global search: request, policy, client, member, Civil ID..." aria-label="Global search">
           </label>
-          <form method="get" action="{% url 'endorsement_list' %}" class="w-full max-w-2xl">
-            <label class="input input-sm input-bordered flex w-full items-center gap-2 bg-base-200/60">
-              <i class="bi bi-search opacity-45"></i>
-              <input type="search" name="q" class="grow" placeholder="Global search: request, policy, client, member, Civil ID..." aria-label="Global search">
-              <kbd class="kbd kbd-xs hidden xl:inline-flex">ENTER</kbd>
-            </label>
-          </form>
-        </div>
-
-        <div class="navbar-end gap-1">
-          <div class="dropdown dropdown-end">
-            <button tabindex="0" class="btn btn-ghost btn-square btn-sm relative" type="button" onclick="window.enableBrowserNotifications?.()" aria-label="Notifications">
-              <i class="bi bi-bell text-lg"></i>
-              {% if unread_notifications %}
-              <span id="notification-badge" class="badge badge-error badge-xs absolute -right-1 -top-1">{{ unread_notifications }}</span>
-              {% endif %}
-            </button>
-            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-[min(26rem,calc(100vw-1.5rem))] overflow-hidden rounded-box border border-base-content/10 bg-base-100 shadow-2xl">
-              <div id="notification-panel"
-                   hx-get="{% url 'notifications_panel' %}"
-                   hx-trigger="load, every 20s"
-                   hx-swap="innerHTML">
-                <div class="p-6 text-center text-sm opacity-60"><span class="loading loading-spinner loading-sm"></span> Loading notifications</div>
-              </div>
-            </div>
-          </div>
-
-          <button id="theme-toggle" class="btn btn-ghost btn-square btn-sm" type="button" aria-label="Toggle light and dark mode" title="Toggle light / dark mode">
-            <i id="theme-toggle-icon" class="bi bi-sun text-lg"></i>
+        </form>
+      </div>
+      <div class="glis-navbar-end gap-1">
+        <div class="dropdown">
+          <button class="btn btn-light glis-btn-icon position-relative" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" onclick="window.enableBrowserNotifications?.()" aria-label="Notifications">
+            <i class="bi bi-bell"></i>{% if unread_notifications %}<span id="notification-badge" class="badge text-bg-danger glis-badge-small position-absolute glis-end-1 glis-top-1">{{ unread_notifications }}</span>{% endif %}
           </button>
-
-          <div class="dropdown dropdown-end">
-            <button tabindex="0" class="btn btn-ghost h-auto min-h-0 gap-2 px-2 py-1.5" type="button">
-              <div class="avatar placeholder">
-                <div class="w-8 rounded bg-primary text-primary-content">
-                  {% if current_profile.photo %}<img src="{{ current_profile.photo.url }}" alt="{{ user.get_full_name|default:user.username }}" class="h-full w-full object-cover">{% else %}<span class="text-xs font-bold">{{ user.username|slice:":1"|upper }}</span>{% endif %}
-                </div>
-              </div>
-              <div class="hidden text-left lg:block">
-                <div class="max-w-36 truncate text-xs font-bold">{{ user.get_full_name|default:user.username }}</div>
-                <div class="max-w-36 truncate text-[10px] opacity-60">{{ current_profile.get_role_display }}</div>
-              </div>
-              <i class="bi bi-chevron-down hidden text-xs opacity-60 lg:block"></i>
-            </button>
-            <div tabindex="0" class="dropdown-content z-[60] mt-3 w-64 rounded-box border border-base-content/10 bg-base-100 p-2 shadow-2xl">
-              <div class="px-3 py-2">
-                <div class="text-sm font-bold">{{ current_profile.organization.name }}</div>
-                <div class="text-xs opacity-60">{{ current_profile.get_role_display }}</div>
-              </div>
-              <div class="divider my-1"></div>
-              <a class="btn btn-ghost btn-sm w-full justify-start" href="{% url 'profile' %}"><i class="bi bi-person-circle"></i>My profile</a>
-              {% if user.is_staff %}
-              <a class="btn btn-ghost btn-sm w-full justify-start" href="/admin/"><i class="bi bi-sliders"></i>Django administration</a>
-              {% endif %}
-              <form method="post" action="{% url 'logout' %}">
-                {% csrf_token %}
-                <button class="btn btn-ghost btn-sm w-full justify-start text-error" type="submit"><i class="bi bi-box-arrow-right"></i>Sign out</button>
-              </form>
-            </div>
+          <div class="dropdown-menu dropdown-menu-end glis-popover-width p-0 overflow-hidden">
+            <div id="notification-panel" hx-get="{% url 'notifications_panel' %}" hx-trigger="load, every 20s" hx-swap="innerHTML"><div class="p-3 text-center small"><span class="spinner-border spinner-border-sm"></span> Loading notifications</div></div>
           </div>
+        </div>
+        <button id="theme-toggle" type="button" class="btn btn-light glis-btn-icon" aria-label="Toggle light and dark mode"><i id="theme-toggle-icon" class="bi bi-sun"></i></button>
+        <div class="dropdown">
+          <button class="btn btn-light gap-2" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            <span class="glis-avatar"><span class="glis-w-8 rounded-circle bg-primary text-white">{% if current_profile.photo %}<img src="{{ current_profile.photo.url }}" alt="">{% else %}{{ user.username|slice:":1"|upper }}{% endif %}</span></span>
+            <span class="d-none d-lg-block small text-start"><strong class="d-block">{{ user.get_full_name|default:user.username }}</strong><small>{{ current_profile.get_role_display }}</small></span><i class="bi bi-chevron-down small"></i>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end glis-menu glis-w-64">
+            <li class="px-3 py-2"><strong class="small">{{ current_profile.organization.name }}</strong></li>
+            <li><a href="{% url 'profile' %}"><i class="bi bi-person-circle"></i>My profile</a></li>
+            {% if user.is_staff %}<li><a href="/admin/"><i class="bi bi-sliders"></i>Django administration</a></li>{% endif %}
+            <li><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="text-danger" type="submit"><i class="bi bi-box-arrow-right"></i>Sign out</button></form></li>
+          </ul>
         </div>
       </div>
     </header>
-
-    <main class="min-w-0 flex-1">
-      <div class="mx-auto w-full max-w-[1800px] p-3 sm:p-4 lg:p-6">
-        <div class="mb-5 flex flex-col gap-3 border-b border-base-content/10 pb-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div class="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.22em] text-primary">
-              <span>{% block page_kicker %}SmartEndorse / Operations{% endblock %}</span>
-            </div>
-            <h1 class="font-mono text-2xl font-medium tracking-[.06em] sm:text-3xl">{% block page_title %}SmartEndorse{% endblock %}</h1>
-          </div>
-          <div class="flex flex-wrap gap-2">{% block object_tools %}{% endblock %}</div>
+    <main id="portal-main" class="p-3 p-lg-4">
+      <div class="mx-auto w-100 se-content-width">
+        <div class="mb-3 d-flex flex-column flex-md-row align-items-md-end justify-content-md-between gap-2 border-bottom border-body pb-3">
+          <div><div class="small text-primary mb-1">{% block page_kicker %}SmartEndorse / Operations{% endblock %}</div><h1 class="fs-4 mb-0">{% block page_title %}SmartEndorse{% endblock %}</h1></div>
+          <div class="d-flex flex-wrap gap-2">{% block object_tools %}{% endblock %}</div>
         </div>
-
-        {% if messages %}
-        <div class="mb-4 space-y-2">
-          {% for message in messages %}
-          <div role="alert" class="alert {% if 'error' in message.tags %}alert-error{% elif 'warning' in message.tags %}alert-warning{% elif 'success' in message.tags %}alert-success{% else %}alert-info{% endif %} shadow-sm">
-            <i class="bi {% if 'error' in message.tags %}bi-x-octagon{% elif 'warning' in message.tags %}bi-exclamation-triangle{% elif 'success' in message.tags %}bi-check-circle{% else %}bi-info-circle{% endif %}"></i>
-            <span>{{ message }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-
+        {% if messages %}<div class="mb-3 glis-stack-2">{% for message in messages %}<div role="alert" class="alert {% if 'error' in message.tags %}alert-danger{% elif 'warning' in message.tags %}alert-warning{% elif 'success' in message.tags %}alert-success{% else %}alert-info{% endif %}"><i class="bi bi-info-circle"></i><span>{{ message }}</span></div>{% endfor %}</div>{% endif %}
         {% block content %}{% endblock %}
       </div>
     </main>
-
-    <footer class="border-t border-base-content/10 bg-base-100 px-5 py-3 text-[10px] uppercase tracking-widest opacity-50">
-      SmartEndorse · audited group insurance endorsement operations
-    </footer>
+    <footer class="border-top border-body bg-body px-3 py-2 small text-body-secondary">SmartEndorse · audited group insurance endorsement operations</footer>
   </div>
-
-  <div class="drawer-side z-50">
-    <label for="portal-drawer" aria-label="Close navigation" class="drawer-overlay"></label>
-    <aside class="se-sidebar min-h-full w-72 border-r border-base-content/10 bg-base-100">
-      <div class="flex h-16 items-center gap-3 border-b border-base-content/10 px-4">
-        <div class="grid h-9 w-9 place-items-center rounded border border-primary/40 bg-primary/10 text-primary">
-          <i class="bi bi-bezier2 text-xl"></i>
-        </div>
-        <div class="min-w-0">
-          <a href="{% url 'dashboard' %}" class="block font-mono text-sm font-bold tracking-[.14em]">SMARTENDORSE</a>
-          <div class="truncate text-[9px] uppercase tracking-[.2em] opacity-50">Mission Control</div>
-        </div>
+  <div id="portal-navigation" class="offcanvas-lg offcanvas-start glis-sidebar-container" tabindex="-1" aria-label="Portal navigation">
+    <aside id="portal-sidebar" class="se-sidebar border-end border-body bg-body">
+      <div class="d-flex align-items-center gap-2 border-bottom border-body px-3">
+        <i class="bi bi-bezier2 fs-4 text-primary"></i><div class="se-sidebar-label"><a href="{% url 'dashboard' %}" class="fw-bold">SMARTENDORSE</a><div class="small text-body-secondary">Endorsement operations</div></div>
+        <button type="button" class="btn-close ms-auto d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#portal-navigation" aria-label="Close navigation"></button>
       </div>
-
-      <nav class="p-3">
-        <div class="mb-2 px-3 pt-2 text-[9px] font-bold uppercase tracking-[.22em] opacity-45">Command</div>
-        <ul class="menu gap-1 p-0 text-sm">
-          <li>
-            <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-              <i class="bi bi-grid-1x2"></i>Overview
-            </a>
-          </li>
-          <li>
-            <a href="{% url 'endorsement_list' %}" class="{% if request.resolver_match.url_name == 'endorsement_list' or request.resolver_match.url_name == 'endorsement_detail' or request.resolver_match.url_name == 'endorsement_item_edit' %}active{% endif %}">
-              <i class="bi bi-diagram-3"></i>Endorsement pipeline
-            </a>
-          </li>
-          {% if portal_can_create %}
-          <li>
-            <a href="{% url 'endorsement_create' %}" class="{% if request.resolver_match.url_name == 'endorsement_create' %}active{% endif %}">
-              <i class="bi bi-plus-square"></i>New endorsement
-            </a>
-          </li>
-          {% endif %}
+      <nav class="p-2">
+        <ul class="glis-menu gap-1">
+          <li><a href="{% url 'dashboard' %}" title="Overview" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><i class="bi bi-grid-1x2"></i><span class="se-sidebar-label">Overview</span></a></li>
+          <li><a href="{% url 'endorsement_list' %}" title="Endorsement pipeline" class="{% if 'endorsement' in request.resolver_match.url_name %}active{% endif %}"><i class="bi bi-diagram-3"></i><span class="se-sidebar-label">Endorsement pipeline</span></a></li>
+          {% if portal_can_create %}<li><a href="{% url 'endorsement_create' %}" title="New endorsement"><i class="bi bi-plus-square"></i><span class="se-sidebar-label">New endorsement</span></a></li>{% endif %}
+          <li><a href="{% url 'inbound_email_list' %}" title="Inbound emails" class="{% if 'inbound_email' in request.resolver_match.url_name %}active{% endif %}"><i class="bi bi-envelope-arrow-down"></i><span class="se-sidebar-label">Inbound emails</span></a></li>
+          {% if user.is_staff %}<li><a href="/admin/" title="Administration"><i class="bi bi-gear"></i><span class="se-sidebar-label">Administration</span></a></li>{% endif %}
         </ul>
-
-        {% if user.is_staff %}
-        <div class="mb-2 mt-6 px-3 text-[9px] font-bold uppercase tracking-[.22em] opacity-45">Control plane</div>
-        <ul class="menu gap-1 p-0 text-sm">
-          <li><a href="/admin/"><i class="bi bi-gear"></i>Administration</a></li>
-        </ul>
-        {% endif %}
-
-        <div class="mt-6 rounded-box border border-base-content/10 bg-base-200/50 p-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[9px] font-bold uppercase tracking-[.18em] opacity-50">Session</span>
-            <span class="badge badge-success badge-xs">LIVE</span>
-          </div>
-          <div class="mt-2 truncate text-xs font-bold">{{ current_profile.organization.name }}</div>
-          <div class="truncate text-[10px] opacity-55">{{ current_profile.get_role_display }}</div>
-        </div>
+        <div class="se-sidebar-label mt-3 p-2 small text-body-secondary"><strong class="d-block">{{ current_profile.organization.name }}</strong>{{ current_profile.get_role_display }}</div>
       </nav>
     </aside>
   </div>
 </div>
-
-<div class="toast toast-top toast-end z-[100]" id="toast-container"></div>
-{% else %}
-  {% block unauthenticated %}{% endblock %}
-{% endif %}
-
-<script src="{% static 'js/app.js' %}"></script>
+<div class="se-toast" id="toast-container" aria-live="polite"></div>
+{% else %}{% block unauthenticated %}{% endblock %}{% endif %}
 </body>
 </html>
