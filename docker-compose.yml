@@ -27,6 +27,7 @@ services:
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
       DATABASE_URL: "postgresql://smartendorse:smartendorse@db:5432/smartendorse"
       EMAIL_BACKEND: "${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}"
+      EMAIL_INTAKE_AUTOSTART: "${EMAIL_INTAKE_AUTOSTART:-0}"
     depends_on:
       db:
         condition: service_healthy
@@ -36,7 +37,7 @@ services:
   mailbox-worker:
     profiles: ["email"]
     build: .
-    command: python manage.py process_mailbox --watch --interval 60
+    command: python manage.py run_email_scheduler
     restart: unless-stopped
     env_file:
       - path: .env
@@ -45,6 +46,7 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-docker-dev-change-me}"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
       DATABASE_URL: "postgresql://smartendorse:smartendorse@db:5432/smartendorse"
+      EMAIL_INTAKE_AUTOSTART: "0"
     depends_on:
       db:
         condition: service_healthy

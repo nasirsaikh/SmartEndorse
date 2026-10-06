@@ -1,4 +1,4 @@
-"""Mailbox transports. Polling is run by process_mailbox, outside web requests."""
+"""Mailbox transports used by APScheduler and the manual process_mailbox command."""
 import base64
 import imaplib
 import os

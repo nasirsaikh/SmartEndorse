@@ -36,11 +36,17 @@ Each grant names a policy, organization, allowed endorsement types and optional 
 
 ## Start the worker
 
+APScheduler starts automatically with local DEBUG/runserver. Set `EMAIL_INTAKE_AUTOSTART=1` explicitly to enable it and `EMAIL_INTAKE_POLL_SECONDS=30` to control the interval. The first poll runs immediately; subsequent cycles pull new emails, process stored pending messages and retry unsent replies. `EMAIL_INTAKE_BATCH_SIZE=50` limits each stage per correction mailbox.
+
+For production, set `EMAIL_INTAKE_AUTOSTART=0` on web processes and run the dedicated scheduler as a separate service:
+
 ```bash
-python manage.py process_mailbox --watch --interval 60
+python manage.py run_email_scheduler --interval 30 --limit 50
 ```
 
-Use a separate service/process from Gunicorn. `--mailbox 1` selects a mailbox and `--limit 50` bounds each poll. Alternatively schedule `python manage.py process_mailbox` with cron, Task Scheduler or your existing job scheduler. For Docker, `docker compose --profile email up -d` also starts the mailbox worker.
+For a manual one-time run, use `python manage.py process_mailbox`; `--mailbox 1` selects a mailbox and `--limit 50` bounds each stage. The existing `--watch` command is retained for compatibility. For Docker, `docker compose --profile email up -d --build` starts the APScheduler worker.
+
+The scheduler uses a single job instance, coalesces missed ticks, and takes an OS file lock to prevent overlapping scheduled polls. Its default lock file is `MEDIA_ROOT/email-intake-poll.lock`, shared by the Docker web and worker volume. Override `EMAIL_INTAKE_LOCK_FILE` when processes need a different shared path. On multiple hosts, use a single dedicated scheduler or a shared filesystem with reliable file locks. See [automatic polling](EMAIL_INTAKE.md#automatic-polling) for the route-based intake path and its mailbox-level interval settings.
 
 The worker persists messages before OCR and commits its mailbox cursor only after ingestion. Processing and delivery use stored state. Failed SMTP/Graph delivery remains pending for retries. No live credentials are included. Incoming automatic replies and messages from the intake mailbox itself are ignored to prevent loops.
 

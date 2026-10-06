@@ -111,7 +111,20 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
 
 
-# Inbound endorsement email polling.
+# APScheduler inbound endorsement email polling and correction reply retries.
 # In DEBUG/runserver it is enabled by default; production can enable it explicitly.
 EMAIL_INTAKE_AUTOSTART = os.getenv("EMAIL_INTAKE_AUTOSTART", "1" if DEBUG else "0") == "1"
 EMAIL_INTAKE_POLL_SECONDS = int(os.getenv("EMAIL_INTAKE_POLL_SECONDS", "30"))
+EMAIL_INTAKE_BATCH_SIZE = int(os.getenv("EMAIL_INTAKE_BATCH_SIZE", "50"))
+# All embedded/dedicated schedulers must share this file when using the same mailboxes.
+# Empty uses MEDIA_ROOT/email-intake-poll.lock (shared by the Docker web and worker).
+EMAIL_INTAKE_LOCK_FILE = os.getenv("EMAIL_INTAKE_LOCK_FILE", "").strip()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "core.email_worker": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}

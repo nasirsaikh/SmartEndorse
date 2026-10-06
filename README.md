@@ -9,6 +9,7 @@ The design follows a zero-touch operating model: structured or unstructured requ
 - Django 5.2 LTS backend with Django Admin as the configuration control plane.
 - Shared compact GLIS Bootstrap 5.3.2 theme, Bootstrap dialogs/tabs and ApexCharts; no frontend build step.
 - Authorized IMAP/Microsoft 365 email intake and reference-based member correction replies.
+- APScheduler automatically pulls and processes emails and retries pending correction replies.
 - HTMX request filtering and dependent plan selection without a SPA framework.
 - ApexCharts dashboards for client, insurer and TPA operating views.
 - Organization model covering insurer, direct client, broker, agent, channel partner and TPA.
@@ -173,13 +174,15 @@ A null parameter omits it for models that reject that parameter. `response_forma
 
 ### Email intake and corrections
 
-Configure **Mailbox configurations** and policy-scoped **Email authorities** in Admin, then run:
+Configure and activate **Mailbox configurations** and policy-scoped **Email authorities** in Admin. APScheduler starts automatically with local DEBUG/runserver and polls every 30 seconds, including authorized correction processing and pending reply retries. In `.env`, set `EMAIL_INTAKE_AUTOSTART=1` to enable it explicitly, `EMAIL_INTAKE_POLL_SECONDS=30` for the interval, and `EMAIL_INTAKE_BATCH_SIZE=50` for the correction mailbox batch limit.
+
+For production, set `EMAIL_INTAKE_AUTOSTART=0` on web processes and run a dedicated scheduler:
 
 ```bash
-python manage.py process_mailbox --watch --interval 60
+python manage.py run_email_scheduler --interval 30 --limit 50
 ```
 
-Use `--mailbox ID` for one mailbox or omit `--watch` for an externally scheduled one-shot run. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply. SMTP must be configured for IMAP; the default console backend prints messages for development. Microsoft 365 uses Graph replies.
+Use `python manage.py process_mailbox --mailbox ID` for a one-time manual poll. Docker's `email` profile starts the APScheduler worker. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply, or [automatic polling](docs/EMAIL_INTAKE.md#automatic-polling) for startup, overlap protection and the existing route-based intake path. SMTP must be configured for IMAP; the default console backend prints messages for development. Microsoft 365 uses Graph replies.
 
 ### Policy configuration
 Each policy controls:

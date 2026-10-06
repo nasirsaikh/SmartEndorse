@@ -13,7 +13,7 @@ class EmailWorkerStartupTests(SimpleTestCase):
 
     @override_settings(EMAIL_INTAKE_AUTOSTART=True)
     def test_management_commands_do_not_start_background_polling(self):
-        for command in ("check", "migrate", "test", "process_email_intake", "process_mailbox"):
+        for command in ("check", "migrate", "test", "process_email_intake", "process_mailbox", "run_email_scheduler"):
             with self.subTest(command=command), patch("sys.argv", ["manage.py", command]), patch("core.email_worker.start_email_worker") as start:
                 self.config.ready()
                 start.assert_not_called()

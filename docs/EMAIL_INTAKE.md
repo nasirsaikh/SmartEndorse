@@ -80,20 +80,34 @@ If no default policy is configured, SmartEndorse looks for the policy number in 
 
 ## Automatic polling
 
-During local DEBUG/runserver, email intake starts automatically by default.
+APScheduler starts automatically during local DEBUG/runserver. The first cycle runs immediately, then polling repeats every 30 seconds by default. It pulls and processes active **Email intake mailboxes** and also runs active **Mailbox configurations** through the [authorized correction/reply workflow](EMAIL_CORRECTIONS.md).
+
+Use **Mailbox configurations** and **Email authorities** when senders should receive reference-numbered correction replies. The route-based **Email intake mailboxes** continue to support their existing sender routes and auto-submit behaviour. Configure each address in one path. If the same address is active in both, the scheduler uses the correction workflow and logs a warning; it skips the duplicate route-based intake.
 
 Environment options:
 
 ```env
 EMAIL_INTAKE_AUTOSTART=1
 EMAIL_INTAKE_POLL_SECONDS=30
+EMAIL_INTAKE_BATCH_SIZE=50
+EMAIL_INTAKE_LOCK_FILE=
 ```
 
-For production, a dedicated worker is also supported:
+`EMAIL_INTAKE_BATCH_SIZE` bounds fetched emails, pending email processing and unsent replies per correction mailbox per cycle. Route-based intake also respects each mailbox's **Poll interval seconds** and **Max messages per poll** settings; its interval can be longer than the scheduler tick.
+
+For production, keep `EMAIL_INTAKE_AUTOSTART=0` on web processes and run the dedicated APScheduler worker as a service:
 
 ```powershell
-python manage.py process_email_intake --loop --interval 30
+python manage.py run_email_scheduler
+# Optional overrides:
+python manage.py run_email_scheduler --interval 30 --limit 50
 ```
+
+For Docker, `docker compose --profile email up -d --build` starts this worker alongside the web app.
+
+Each scheduler allows only one job instance at a time and coalesces missed ticks. A shared OS file lock prevents overlapping scheduled polls across processes on the same filesystem. The default lock is `MEDIA_ROOT/email-intake-poll.lock`; Docker web/worker share the media volume. For multiple hosts, run one dedicated scheduler or use a shared path with reliable OS file locking via `EMAIL_INTAKE_LOCK_FILE`.
+
+Shutdown waits for the current job to finish. Mailbox cursors, ingested emails and unsent correction replies stay in the database and resume on startup. A mailbox failure is logged and retried without blocking the other configured mailboxes. Pending correction processing and reply delivery are attempted even when fetching new emails fails. No active mailbox is a valid idle state.
 
 One-time/manual poll:
 

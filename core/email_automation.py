@@ -1,6 +1,7 @@
 import base64
 import email
 import imaplib
+import logging
 import re
 from datetime import datetime
 from email.header import decode_header, make_header
@@ -24,6 +25,7 @@ from .models import (
     EmailIntakeRoute,
     EndorsementItem,
     EndorsementRequest,
+    MailboxConfiguration,
     Policy,
     PortalNotification,
     UserProfile,
@@ -33,16 +35,26 @@ from .services import FileIntakeService, NotificationService, WorkflowService, j
 
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+logger = logging.getLogger(__name__)
 
 
 class EmailIntakeService:
     """Read inbound endorsement emails and route them through the normal SmartEndorse workflow."""
 
     @classmethod
-    def poll_all(cls, force=False):
+    def poll_all(cls, force=False, exclude_correction_mailboxes=False):
         result = {"mailboxes": 0, "messages": 0, "processed": 0, "failed": 0}
         now = timezone.now()
+        correction_addresses = set()
+        if exclude_correction_mailboxes:
+            correction_addresses = {
+                address.strip().casefold()
+                for address in MailboxConfiguration.objects.filter(is_active=True).values_list("email_address", flat=True)
+            }
         for mailbox in EmailIntakeMailbox.objects.filter(is_active=True).order_by("id"):
+            if mailbox.email_address.strip().casefold() in correction_addresses:
+                logger.warning("Email intake mailbox %s is also an active correction mailbox; the scheduler uses the correction workflow for this address.", mailbox.pk)
+                continue
             if (
                 not force
                 and mailbox.last_polled_at
@@ -50,7 +62,12 @@ class EmailIntakeService:
             ):
                 continue
             result["mailboxes"] += 1
-            stats = cls.poll_mailbox(mailbox)
+            try:
+                stats = cls.poll_mailbox(mailbox)
+            except Exception:
+                result["failed"] += 1
+                logger.exception("Email intake mailbox %s failed; continuing with the other active mailboxes.", mailbox.pk)
+                continue
             for key in ("messages", "processed", "failed"):
                 result[key] += stats[key]
         return result
