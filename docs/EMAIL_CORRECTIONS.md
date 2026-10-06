@@ -18,6 +18,16 @@ For **IMAP / SMTP**, set the TLS IMAP host/port, username, folder, and a credent
 
 For **Microsoft 365 / Graph**, configure tenant ID, client ID, and a client-secret environment reference, e.g. `ENDORSEMENT_GRAPH_CLIENT_SECRET`. Use application `Mail.ReadWrite` and `Mail.Send` permissions with tenant admin consent, scoped by your Exchange application access policy to the chosen mailbox. Inbound messages are fetched as MIME; outgoing emails are native replies with the reference appended to the subject. The worker retains Graph reply drafts during retry. See [Graph createReply](https://learn.microsoft.com/en-us/graph/api/message-createreply?view=graph-rest-1.0) and [message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0).
 
+The **Graph secret reference** field contains the variable name, and `.env` next to `manage.py` contains the actual client secret:
+
+```env
+ENDORSEMENT_GRAPH_CLIENT_SECRET="your-full-client-secret-value"
+```
+
+Set **Graph secret reference** to `ENDORSEMENT_GRAPH_CLIENT_SECRET`. Use the client secret **Value** from Entra App registrations > your application > Certificates & secrets, not the Secret ID. Save the mailbox and restart Django and any dedicated scheduler after changing `.env`; running processes do not reload credentials from that file. Reference fields accept variable names using letters, digits and underscores, starting with a letter or underscore.
+
+If polling reports that the referenced environment variable is missing or empty, verify that `.env` is in the project root and the variable name matches the reference field. The app logs a configuration warning without echoing the submitted reference or secret. It continues processing stored messages and retries credential resolution on subsequent polls. A mailbox worker in Docker receives its secrets through the Compose `.env` configuration and must be recreated after a credential change.
+
 Sender authentication is enabled by default. Configure **Trusted authserv IDs** with the exact names in Authentication-Results headers produced by your receiving mail servers, e.g. `["mx.company.example"]`. The worker accepts a DMARC pass for the sender's From domain only from these servers. Your gateway must strip forged headers using its own authserv ID. Disable the check only where an upstream verified identity mechanism is enforced; exact policy authorization remains required either way. Unauthorized messages receive no member-containing reply.
 
 A **Default policy** is optional. If the email omits a policy number, a single active policy grant may disambiguate it. More than one policy remains a review item. Effective dates are never guessed: use `Effective date: YYYY-MM-DD` in the body. Select **Auto submit** only if valid emails should continue into existing pricing, STP, insurer approval and TPA/core dispatch. Otherwise they remain ready for explicit portal submission.

@@ -3,6 +3,7 @@ import logging
 
 from django.utils import timezone
 
+from .credentials import MailboxCredentialError
 from .email_intake import deliver_reply, process_email
 from .mailbox import GraphMailbox, IMAPMailbox
 from .models import EmailReply, InboundEmail, MailboxConfiguration
@@ -19,6 +20,10 @@ def poll_correction_mailbox(config, limit=50):
         stats["messages"] = len(transport.poll(limit))
         config.last_sync_at = timezone.now()
         config.last_error = ""
+    except MailboxCredentialError as exc:
+        config.last_error = str(exc)
+        stats["failed"] += 1
+        logger.warning("Mailbox %s configuration: %s", config.pk, exc)
     except Exception as exc:
         config.last_error = str(exc)
         stats["failed"] += 1

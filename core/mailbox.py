@@ -1,20 +1,13 @@
 """Mailbox transports used by APScheduler and the manual process_mailbox command."""
 import base64
 import imaplib
-import os
 from urllib.parse import quote, urlsplit
 
 import httpx
 
 from .email_intake import ingest_message, reply_message
+from .credentials import credential
 from .models import InboundEmail
-
-
-def credential(name):
-    value = os.getenv(name, "") if name else ""
-    if not value:
-        raise RuntimeError(f"Mailbox credential environment variable {name or '(not configured)'} is missing.")
-    return value
 
 
 class IMAPMailbox:
@@ -24,10 +17,10 @@ class IMAPMailbox:
     def poll(self, limit=50):
         config = self.config
         result = []
+        secret = credential(config.credential_reference, label="IMAP credential reference")
         # Always use TLS; credentials never leave an encrypted connection.
         with imaplib.IMAP4_SSL(config.imap_host, config.imap_port, timeout=30) as client:
             username = config.imap_username or config.email_address
-            secret = credential(config.credential_reference)
             if config.use_oauth:
                 value = f"user={username}\x01auth=Bearer {secret}\x01\x01".encode()
                 client.authenticate("XOAUTH2", lambda _: value)
@@ -63,11 +56,12 @@ class GraphMailbox:
 
     def __init__(self, config):
         self.config = config
+        secret = credential(config.graph_secret_reference, label="Graph secret reference", example="ENDORSEMENT_GRAPH_CLIENT_SECRET")
         self.client = httpx.Client(timeout=60)
         try:
             response = self.client.post(
                 f"https://login.microsoftonline.com/{quote(config.graph_tenant_id, safe='')}/oauth2/v2.0/token",
-                data={"client_id": config.graph_client_id, "client_secret": credential(config.graph_secret_reference), "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
+                data={"client_id": config.graph_client_id, "client_secret": secret, "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
             ).raise_for_status().json()
         except Exception:
             self.client.close()

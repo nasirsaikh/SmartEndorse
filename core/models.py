@@ -6,6 +6,8 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from .credentials import validate_credential_reference
+
 
 def default_weekend_days():
     return [4, 5]
@@ -697,12 +699,12 @@ class MailboxConfiguration(TimeStampedModel):
     imap_host = models.CharField(max_length=200, blank=True)
     imap_port = models.PositiveIntegerField(default=993)
     imap_username = models.CharField(max_length=200, blank=True)
-    credential_reference = models.CharField(max_length=160, blank=True, help_text="Environment variable holding the IMAP password or OAuth access token.")
+    credential_reference = models.CharField(max_length=160, blank=True, validators=[validate_credential_reference], help_text="Environment variable name, e.g. ENDORSEMENT_IMAP_PASSWORD. Set its value in .env or the worker environment. Do not enter the password/token here.")
     use_oauth = models.BooleanField(default=False)
     folder = models.CharField(max_length=100, default="INBOX")
     graph_tenant_id = models.CharField(max_length=120, blank=True)
     graph_client_id = models.CharField(max_length=120, blank=True)
-    graph_secret_reference = models.CharField(max_length=160, blank=True)
+    graph_secret_reference = models.CharField(max_length=160, blank=True, validators=[validate_credential_reference], help_text="Environment variable name, e.g. ENDORSEMENT_GRAPH_CLIENT_SECRET. Set its value to the Entra client secret VALUE in .env or the worker environment. Do not enter the secret or its ID here.")
     default_policy = models.ForeignKey(Policy, null=True, blank=True, on_delete=models.SET_NULL)
     auto_submit = models.BooleanField(default=False, help_text="After successful validation, continue through the existing approval/STP workflow.")
     require_sender_authentication = models.BooleanField(default=True, help_text="Require an aligned DMARC pass from a configured trusted Authentication-Results server before applying email data.")
