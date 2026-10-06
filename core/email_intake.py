@@ -648,9 +648,15 @@ def deliver_reply(reply_id):
                 finally:
                     client.close()
             else:
+                from .mailbox import smtp_connection
                 message = reply_message(reply)
-                if message.send(fail_silently=False) != 1:
-                    raise RuntimeError("Mail backend did not confirm delivery.")
+                connection = smtp_connection(email.mailbox)
+                message.connection = connection
+                try:
+                    if message.send(fail_silently=False) != 1:
+                        raise RuntimeError("Mail backend did not confirm delivery.")
+                finally:
+                    connection.close()
             reply.sent_at = timezone.now()
             reply.last_error = ""
         except Exception as exc:

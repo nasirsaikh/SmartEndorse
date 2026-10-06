@@ -6,9 +6,6 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from .credentials import validate_credential_reference
-
-
 def default_weekend_days():
     return [4, 5]
 
@@ -692,6 +689,10 @@ class MailboxConfiguration(TimeStampedModel):
         IMAP = "IMAP", "IMAP / SMTP"
         GRAPH = "GRAPH", "Microsoft 365 / Graph"
 
+    class ReplyBackend(models.TextChoices):
+        SMTP = "SMTP", "SMTP delivery"
+        CONSOLE = "CONSOLE", "Console (development only)"
+
     name = models.CharField(max_length=120, unique=True)
     email_address = models.EmailField()
     transport = models.CharField(max_length=12, choices=Transport.choices, default=Transport.IMAP)
@@ -699,12 +700,20 @@ class MailboxConfiguration(TimeStampedModel):
     imap_host = models.CharField(max_length=200, blank=True)
     imap_port = models.PositiveIntegerField(default=993)
     imap_username = models.CharField(max_length=200, blank=True)
-    credential_reference = models.CharField(max_length=160, blank=True, validators=[validate_credential_reference], help_text="Environment variable name, e.g. ENDORSEMENT_IMAP_PASSWORD. Set its value in .env or the worker environment. Do not enter the password/token here.")
+    imap_password = models.TextField(blank=True, verbose_name="IMAP password / OAuth token", help_text="Enter the mailbox password, app password or OAuth access token directly here.")
     use_oauth = models.BooleanField(default=False)
     folder = models.CharField(max_length=100, default="INBOX")
     graph_tenant_id = models.CharField(max_length=120, blank=True)
     graph_client_id = models.CharField(max_length=120, blank=True)
-    graph_secret_reference = models.CharField(max_length=160, blank=True, validators=[validate_credential_reference], help_text="Environment variable name, e.g. ENDORSEMENT_GRAPH_CLIENT_SECRET. Set its value to the Entra client secret VALUE in .env or the worker environment. Do not enter the secret or its ID here.")
+    graph_client_secret = models.TextField(blank=True, help_text="Enter the full client secret Value from Entra App registrations > Certificates & secrets.")
+    reply_backend = models.CharField(max_length=12, choices=ReplyBackend.choices, default=ReplyBackend.SMTP, help_text="Used for IMAP replies. Graph mailboxes send native Microsoft 365 replies.")
+    smtp_host = models.CharField(max_length=200, blank=True)
+    smtp_port = models.PositiveIntegerField(default=587, validators=[MinValueValidator(1)])
+    smtp_username = models.CharField(max_length=200, blank=True, help_text="Leave blank for an SMTP relay that does not require authentication.")
+    smtp_password = models.TextField(blank=True, help_text="Enter the SMTP password or app password directly here.")
+    smtp_use_tls = models.BooleanField(default=True, verbose_name="SMTP STARTTLS")
+    smtp_use_ssl = models.BooleanField(default=False, verbose_name="SMTP implicit TLS / SSL")
+    smtp_timeout = models.PositiveIntegerField(default=30, validators=[MinValueValidator(1)], help_text="SMTP connection timeout in seconds.")
     default_policy = models.ForeignKey(Policy, null=True, blank=True, on_delete=models.SET_NULL)
     auto_submit = models.BooleanField(default=False, help_text="After successful validation, continue through the existing approval/STP workflow.")
     require_sender_authentication = models.BooleanField(default=True, help_text="Require an aligned DMARC pass from a configured trusted Authentication-Results server before applying email data.")
@@ -719,8 +728,20 @@ class MailboxConfiguration(TimeStampedModel):
         errors = {}
         if self.transport == self.Transport.IMAP and not self.imap_host:
             errors["imap_host"] = "IMAP host is required."
-        if self.transport == self.Transport.GRAPH and not all((self.graph_tenant_id, self.graph_client_id, self.graph_secret_reference)):
-            errors["graph_client_id"] = "Tenant, client ID and client secret reference are required for Graph."
+        if self.is_active:
+            if self.transport == self.Transport.GRAPH:
+                for field, label in (("graph_tenant_id", "Tenant ID"), ("graph_client_id", "Client ID"), ("graph_client_secret", "Client secret Value")):
+                    if not getattr(self, field).strip():
+                        errors[field] = f"{label} is required for an active Graph mailbox."
+            else:
+                if not self.imap_password.strip():
+                    errors["imap_password"] = "Enter the IMAP password, app password or OAuth token before activating the mailbox."
+                if self.reply_backend == self.ReplyBackend.SMTP and not self.smtp_host:
+                    errors["smtp_host"] = "SMTP host is required to deliver replies for an active IMAP mailbox."
+        if self.smtp_use_tls and self.smtp_use_ssl:
+            errors["smtp_use_ssl"] = "Choose STARTTLS or implicit TLS/SSL, not both."
+        if self.is_active and self.transport == self.Transport.IMAP and self.reply_backend == self.ReplyBackend.SMTP and self.smtp_username and not self.smtp_password.strip():
+            errors["smtp_password"] = "SMTP password is required when an SMTP username is configured."
         if not isinstance(self.trusted_authserv_ids, list) or any(not isinstance(x, str) for x in self.trusted_authserv_ids):
             errors["trusted_authserv_ids"] = "Use a JSON array of mail server names."
         elif self.is_active and self.require_sender_authentication and not self.trusted_authserv_ids:

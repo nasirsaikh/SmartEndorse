@@ -182,7 +182,9 @@ For production, set `EMAIL_INTAKE_AUTOSTART=0` on web processes and run a dedica
 python manage.py run_email_scheduler --interval 30 --limit 50
 ```
 
-Use `python manage.py process_mailbox --mailbox ID` for a one-time manual poll. Docker's `email` profile starts the APScheduler worker. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply, or [automatic polling](docs/EMAIL_INTAKE.md#automatic-polling) for startup, overlap protection and the existing route-based intake path. SMTP must be configured for IMAP; the default console backend prints messages for development. Microsoft 365 uses Graph replies.
+Enter the actual **Graph client secret** or **IMAP password / OAuth token** in the mailbox Admin settings. IMAP mailboxes also configure their SMTP reply server, username, password and TLS options there. Secrets remain hidden in the forms; blank password inputs preserve saved values. Admin changes apply on the next scheduled poll. Select **Console (development only)** for IMAP replies when you want output printed during development. Microsoft 365 uses native Graph replies.
+
+Use `python manage.py process_mailbox --mailbox ID` for a one-time manual poll. Docker's `email` profile starts the APScheduler worker. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply, or [automatic polling](docs/EMAIL_INTAKE.md#automatic-polling) for startup, overlap protection and the existing route-based intake path.
 
 ### Policy configuration
 Each policy controls:

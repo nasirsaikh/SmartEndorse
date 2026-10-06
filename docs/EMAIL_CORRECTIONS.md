@@ -12,21 +12,17 @@ API references: [Hugging Face routing](https://huggingface.co/docs/inference-pro
 
 ## Configure a mailbox
 
-Create a **Mailbox configuration** in Admin. Its sender address must be a mailbox your sending service may send as. The worker reads `.env` just like the web app.
+Create a **Mailbox configuration** in Admin. Its sender address must be a mailbox your sending service may send as. All mailbox passwords, client secrets and IMAP reply delivery settings are saved directly in this Admin page.
 
-For **IMAP / SMTP**, set the TLS IMAP host/port, username, folder, and a credential environment reference, e.g. `ENDORSEMENT_IMAP_PASSWORD`. Select OAuth when the variable contains an access token. SMTP uses the Django `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` and `EMAIL_USE_TLS` settings. Use `EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend` for delivery; the default console backend is for development only.
+For **IMAP / SMTP**, set the TLS IMAP host/port, username, folder and actual **IMAP password / OAuth token**. Select OAuth when entering an access token. Under **IMAP reply delivery**, select **SMTP delivery** and enter the SMTP host, port, username, password, timeout and either STARTTLS or implicit TLS/SSL. An anonymous SMTP relay may leave username/password blank. Select **Console (development only)** to print replies during development.
 
-For **Microsoft 365 / Graph**, configure tenant ID, client ID, and a client-secret environment reference, e.g. `ENDORSEMENT_GRAPH_CLIENT_SECRET`. Use application `Mail.ReadWrite` and `Mail.Send` permissions with tenant admin consent, scoped by your Exchange application access policy to the chosen mailbox. Inbound messages are fetched as MIME; outgoing emails are native replies with the reference appended to the subject. The worker retains Graph reply drafts during retry. See [Graph createReply](https://learn.microsoft.com/en-us/graph/api/message-createreply?view=graph-rest-1.0) and [message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0).
+For **Microsoft 365 / Graph**, enter the tenant ID, client ID and full **Graph client secret** Value from Entra App registrations > your application > Certificates & secrets. Use application `Mail.ReadWrite` and `Mail.Send` permissions with tenant admin consent, scoped by your Exchange application access policy to the chosen mailbox. Inbound messages are fetched as MIME; outgoing emails are native replies with the reference appended to the subject. The worker retains Graph reply drafts during retry. See [Graph createReply](https://learn.microsoft.com/en-us/graph/api/message-createreply?view=graph-rest-1.0) and [message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0).
 
-The **Graph secret reference** field contains the variable name, and `.env` next to `manage.py` contains the actual client secret:
+Secrets are stored with the mailbox in the database. Password inputs are blank when reopening the form and never contain the saved value in the HTML. Leave them blank to preserve existing credentials, enter a replacement to update them, or select **Clear saved value** to remove them. Deactivate the mailbox before clearing required credentials. The existing route-based Email intake mailbox forms follow the same preservation behaviour.
 
-```env
-ENDORSEMENT_GRAPH_CLIENT_SECRET="your-full-client-secret-value"
-```
+Save the mailbox and the scheduler reads the updated credentials on its next poll. IMAP correction replies use that mailbox's saved SMTP settings. Configuration errors name the missing field without printing secret values.
 
-Set **Graph secret reference** to `ENDORSEMENT_GRAPH_CLIENT_SECRET`. Use the client secret **Value** from Entra App registrations > your application > Certificates & secrets, not the Secret ID. Save the mailbox and restart Django and any dedicated scheduler after changing `.env`; running processes do not reload credentials from that file. Reference fields accept variable names using letters, digits and underscores, starting with a letter or underscore.
-
-If polling reports that the referenced environment variable is missing or empty, verify that `.env` is in the project root and the variable name matches the reference field. The app logs a configuration warning without echoing the submitted reference or secret. It continues processing stored messages and retries credential resolution on subsequent polls. A mailbox worker in Docker receives its secrets through the Compose `.env` configuration and must be recreated after a credential change.
+After upgrading, run migrations. The former reference fields are renamed to the direct credential fields and their stored values are preserved. If you previously saved an environment variable name, replace it with the actual password/client secret Value in Admin. Previously pasted secret values remain available without copying them into another file.
 
 Sender authentication is enabled by default. Configure **Trusted authserv IDs** with the exact names in Authentication-Results headers produced by your receiving mail servers, e.g. `["mx.company.example"]`. The worker accepts a DMARC pass for the sender's From domain only from these servers. Your gateway must strip forged headers using its own authserv ID. Disable the check only where an upstream verified identity mechanism is enforced; exact policy authorization remains required either way. Unauthorized messages receive no member-containing reply.
 

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from apscheduler.events import EVENT_JOB_MAX_INSTANCES
 from django.core import mail
+from django.core.mail import get_connection
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -154,7 +155,10 @@ class ScheduledCorrectionTests(BaseInsuranceTest):
         self.requester.email = "hr@client.example"
         self.requester.save()
         PolicyAccess.objects.create(policy=self.policy, organization=self.client, can_create=True)
-        self.mailbox = MailboxConfiguration.objects.create(name="Corrections", email_address="intake@insurer.example", imap_host="imap.insurer.example", trusted_authserv_ids=["mx.insurer.example"], is_active=True)
+        self.mailbox = MailboxConfiguration.objects.create(name="Corrections", email_address="intake@insurer.example", imap_host="imap.insurer.example", smtp_host="smtp.insurer.example", trusted_authserv_ids=["mx.insurer.example"], is_active=True)
+        smtp = patch("core.mailbox.get_connection", side_effect=lambda **kwargs: get_connection(backend="django.core.mail.backends.locmem.EmailBackend"))
+        smtp.start()
+        self.addCleanup(smtp.stop)
         EmailAuthority.objects.create(name="Authorized HR", email_address=self.requester.email, organization=self.client, policy=self.policy, processing_user=self.requester)
         self.counter = 0
 

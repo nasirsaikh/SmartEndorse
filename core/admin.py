@@ -16,6 +16,34 @@ class AIProviderAdminForm(forms.ModelForm):
         widgets = {"api_key": forms.PasswordInput(render_value=True)}
 
 
+class SavedSecretAdminForm(forms.ModelForm):
+    """Keep stored secrets on blank submissions without rendering them into HTML."""
+    secret_fields = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in self.secret_fields:
+            if name not in self.fields:
+                continue
+            self.fields[name].strip = False
+            if self.instance.pk and getattr(self.instance, name, ""):
+                self.fields[name].help_text += " A value is saved. Leave blank to keep it, enter a replacement, or select Clear saved value."
+
+    def clean(self):
+        cleaned = super().clean()
+        for name in self.secret_fields:
+            if name not in self.fields:
+                continue
+            if cleaned.get("clear_" + name):
+                if cleaned.get(name):
+                    self.add_error(name, "Enter a replacement or select Clear saved value, not both.")
+                else:
+                    cleaned[name] = ""
+            elif not cleaned.get(name) and self.instance.pk:
+                cleaned[name] = getattr(self.instance, name)
+        return cleaned
+
+
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "organization_type", "notification_email", "is_active")
@@ -111,13 +139,17 @@ class AIExtractionProfileAdmin(admin.ModelAdmin):
         return obj.examples.filter(is_active=True).count()
 
 
-class EmailIntakeMailboxAdminForm(forms.ModelForm):
+class EmailIntakeMailboxAdminForm(SavedSecretAdminForm):
+    secret_fields = ("imap_password", "graph_client_secret")
+    clear_imap_password = forms.BooleanField(required=False, label="Clear saved IMAP password")
+    clear_graph_client_secret = forms.BooleanField(required=False, label="Clear saved Graph client secret")
+
     class Meta:
         model = EmailIntakeMailbox
         fields = "__all__"
         widgets = {
-            "imap_password": forms.PasswordInput(render_value=True),
-            "graph_client_secret": forms.PasswordInput(render_value=True),
+            "imap_password": forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
+            "graph_client_secret": forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
         }
 
 
@@ -139,11 +171,11 @@ class EmailIntakeMailboxAdmin(admin.ModelAdmin):
         ("Mailbox", {"fields": ("name", "email_address", "provider", "is_active", "folder", "max_messages_per_poll", "poll_interval_seconds")}),
         ("Automation", {"fields": ("auto_submit", "mark_as_read", "default_requester")}),
         ("Microsoft 365 / Graph", {
-            "fields": ("graph_tenant_id", "graph_client_id", "graph_client_secret"),
+            "fields": ("graph_tenant_id", "graph_client_id", "graph_client_secret", "clear_graph_client_secret"),
             "description": "Use an Entra ID app with Microsoft Graph application permission Mail.ReadWrite for this mailbox. Admin consent is required.",
         }),
         ("IMAP", {
-            "fields": ("imap_host", "imap_port", "imap_username", "imap_password", "imap_use_ssl"),
+            "fields": ("imap_host", "imap_port", "imap_username", "imap_password", "clear_imap_password", "imap_use_ssl"),
             "description": "Use IMAP for providers that permit it. For Microsoft 365, Graph is recommended.",
         }),
         ("Runtime", {"fields": ("last_polled_at",)}),
@@ -311,15 +343,32 @@ admin.site.index_title = "Automation & Configuration"
 from .models import EmailAuthority, EmailEvidence, EmailReply, InboundEmail, MailboxConfiguration
 
 
+class MailboxConfigurationAdminForm(SavedSecretAdminForm):
+    secret_fields = ("imap_password", "graph_client_secret", "smtp_password")
+    clear_imap_password = forms.BooleanField(required=False, label="Clear saved IMAP password / token")
+    clear_graph_client_secret = forms.BooleanField(required=False, label="Clear saved Graph client secret")
+    clear_smtp_password = forms.BooleanField(required=False, label="Clear saved SMTP password")
+
+    class Meta:
+        model = MailboxConfiguration
+        fields = "__all__"
+        widgets = {
+            name: forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"})
+            for name in ("imap_password", "graph_client_secret", "smtp_password")
+        }
+
+
 @admin.register(MailboxConfiguration)
 class MailboxConfigurationAdmin(admin.ModelAdmin):
+    form = MailboxConfigurationAdminForm
     list_display = ("name", "email_address", "transport", "is_active", "auto_submit", "last_sync_at", "last_error")
     list_filter = ("transport", "is_active", "auto_submit")
     readonly_fields = ("cursor", "last_sync_at", "last_error")
     fieldsets = (
         ("Mailbox", {"fields": ("name", "email_address", "transport", "is_active", "folder", "default_policy", "auto_submit")}),
-        ("IMAP", {"fields": ("imap_host", "imap_port", "imap_username", "credential_reference", "use_oauth")}),
-        ("Microsoft 365", {"fields": ("graph_tenant_id", "graph_client_id", "graph_secret_reference")}),
+        ("IMAP", {"fields": ("imap_host", "imap_port", "imap_username", "imap_password", "clear_imap_password", "use_oauth")}),
+        ("Microsoft 365", {"fields": ("graph_tenant_id", "graph_client_id", "graph_client_secret", "clear_graph_client_secret")}),
+        ("IMAP reply delivery", {"fields": ("reply_backend", "smtp_host", "smtp_port", "smtp_username", "smtp_password", "clear_smtp_password", "smtp_use_tls", "smtp_use_ssl", "smtp_timeout")}),
         ("Sender verification", {"fields": ("require_sender_authentication", "trusted_authserv_ids")}),
         ("Polling status", {"fields": ("cursor", "last_sync_at", "last_error")}),
     )

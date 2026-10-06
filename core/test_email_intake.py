@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 from django.contrib.auth.models import Group
 from django.core import mail
+from django.core.mail import get_connection
 from django.test import TestCase, override_settings
 
 from .ai import AIService
@@ -40,7 +41,10 @@ class EmailCorrectionTests(BaseInsuranceTest):
         self.requester.email = "requester@client.example"
         self.requester.save()
         PolicyAccess.objects.create(policy=self.policy, organization=self.client, can_create=True)
-        self.mailbox = MailboxConfiguration.objects.create(name="Test", email_address="intake@insurer.example", imap_host="imap.insurer.example", trusted_authserv_ids=["mx.insurer.example"], is_active=True)
+        self.mailbox = MailboxConfiguration.objects.create(name="Test", email_address="intake@insurer.example", imap_host="imap.insurer.example", smtp_host="smtp.insurer.example", trusted_authserv_ids=["mx.insurer.example"], is_active=True)
+        smtp = patch("core.mailbox.get_connection", side_effect=lambda **kwargs: get_connection(backend="django.core.mail.backends.locmem.EmailBackend"))
+        smtp.start()
+        self.addCleanup(smtp.stop)
         self.authority = EmailAuthority.objects.create(name="Policy sender", email_address=self.requester.email, organization=self.client, policy=self.policy, processing_user=self.requester)
         self.counter = 0
 
@@ -297,9 +301,8 @@ class EmailCorrectionTests(BaseInsuranceTest):
         self.assertEqual(original.reply.body_text, sent_body)
 
     @patch("core.mailbox.imaplib.IMAP4_SSL")
-    @patch.dict(os.environ, {"IMAP_TEST_SECRET": "test-secret"})
     def test_imap_cursor_advances_only_after_ingestion_and_fetch_retry_is_safe(self, imap):
-        self.mailbox.credential_reference = "IMAP_TEST_SECRET"; self.mailbox.save()
+        self.mailbox.imap_password = "test-secret"; self.mailbox.save()
         message = EmailMessage()
         message["From"] = self.requester.email
         message["Message-ID"] = "<imap-message@client.example>"
@@ -322,11 +325,10 @@ class EmailCorrectionTests(BaseInsuranceTest):
             IMAPMailbox(self.mailbox).poll()
 
     @patch("core.mailbox.httpx.Client")
-    @patch.dict(os.environ, {"GRAPH_TEST_SECRET": "test-secret"})
     def test_graph_pending_page_survives_partial_failure(self, client_type):
         self.mailbox.graph_tenant_id = "tenant"
         self.mailbox.graph_client_id = "client"
-        self.mailbox.graph_secret_reference = "GRAPH_TEST_SECRET"
+        self.mailbox.graph_client_secret = "test-secret"
         self.mailbox.save()
         client = client_type.return_value
         root_url = GraphMailbox.ROOT
@@ -352,12 +354,11 @@ class EmailCorrectionTests(BaseInsuranceTest):
         graph.close()
 
     @patch("core.mailbox.httpx.Client")
-    @patch.dict(os.environ, {"GRAPH_TEST_SECRET": "test-secret"})
     def test_graph_native_reply_preserves_headers_and_does_not_resend_sent_draft(self, client_type):
         self.mailbox.transport = "GRAPH"
         self.mailbox.graph_tenant_id = "tenant"
         self.mailbox.graph_client_id = "client"
-        self.mailbox.graph_secret_reference = "GRAPH_TEST_SECRET"
+        self.mailbox.graph_client_secret = "test-secret"
         self.mailbox.save()
         original = self.initial()
         client = client_type.return_value

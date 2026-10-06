@@ -4,9 +4,10 @@ import imaplib
 from urllib.parse import quote, urlsplit
 
 import httpx
+from django.core.mail import get_connection
 
 from .email_intake import ingest_message, reply_message
-from .credentials import credential
+from .credentials import MailboxCredentialError, credential
 from .models import InboundEmail
 
 
@@ -17,7 +18,7 @@ class IMAPMailbox:
     def poll(self, limit=50):
         config = self.config
         result = []
-        secret = credential(config.credential_reference, label="IMAP credential reference")
+        secret = credential(config.imap_password, label="IMAP password / OAuth token")
         # Always use TLS; credentials never leave an encrypted connection.
         with imaplib.IMAP4_SSL(config.imap_host, config.imap_port, timeout=30) as client:
             username = config.imap_username or config.email_address
@@ -56,7 +57,7 @@ class GraphMailbox:
 
     def __init__(self, config):
         self.config = config
-        secret = credential(config.graph_secret_reference, label="Graph secret reference", example="ENDORSEMENT_GRAPH_CLIENT_SECRET")
+        secret = credential(config.graph_client_secret, label="Graph client secret")
         self.client = httpx.Client(timeout=60)
         try:
             response = self.client.post(
@@ -143,3 +144,27 @@ class GraphMailbox:
                     "contentBytes": base64.b64encode(reply.correction_csv.encode()).decode(),
                 }).raise_for_status()
         self.client.post(draft_url + "/send", json={}).raise_for_status()
+
+
+def smtp_connection(config):
+    """Build reply delivery entirely from the mailbox's saved Admin settings."""
+    if config.reply_backend == "CONSOLE":
+        return get_connection(backend="django.core.mail.backends.console.EmailBackend")
+    if not config.smtp_host:
+        raise MailboxCredentialError("SMTP host is missing. Configure reply delivery in Admin > Mailbox configurations.")
+    if config.smtp_use_tls and config.smtp_use_ssl:
+        raise MailboxCredentialError("Choose either SMTP STARTTLS or implicit TLS/SSL in Admin > Mailbox configurations.")
+    if config.smtp_username:
+        credential(config.smtp_password, label="SMTP password")
+    return get_connection(
+        backend="django.core.mail.backends.smtp.EmailBackend",
+        host=config.smtp_host,
+        port=config.smtp_port,
+        username=config.smtp_username,
+        password=config.smtp_password,
+        use_tls=config.smtp_use_tls,
+        use_ssl=config.smtp_use_ssl,
+        timeout=config.smtp_timeout,
+        ssl_keyfile="",
+        ssl_certfile="",
+    )

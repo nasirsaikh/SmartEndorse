@@ -59,4 +59,6 @@ AI provider configs now include Hugging Face, API token environment references, 
 
 Mailbox configurations select IMAP/SMTP or Microsoft 365 Graph. Email authorities permit exact email addresses, portal users or Django groups for a specific policy, organization, endorsement types and validity dates. Active portal identities need policy creation access. External senders require an active processing user belonging to the configured organization with policy creation access.
 
+Enter mailbox passwords and Graph client secrets directly in the mailbox Admin form. IMAP replies also use its saved SMTP host, port, username, password and TLS settings. Saved secrets are hidden; blank inputs retain them and Clear saved value removes them. Changes are read on the next scheduled poll.
+
 Run `python manage.py process_mailbox --watch --interval 60` as a dedicated worker. Correction replies separate correct/error members, retain the email reference and include an editable CSV. Unsent replies can be retried in Admin; processed inbox messages and sent replies are idempotent. Setup details: [EMAIL_CORRECTIONS.md](EMAIL_CORRECTIONS.md).
