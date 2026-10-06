@@ -789,9 +789,13 @@ class FileIntakeService:
         if isinstance(value, date):
             return value
         text = str(value).strip()
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d.%m.%Y"):
+        formats = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d.%m.%Y",
+                   "%d-%b-%Y", "%d-%b-%y", "%d %b %Y", "%d %b %y",
+                   "%d-%B-%Y", "%d-%B-%y", "%d %B %Y", "%d %B %y")
+        for fmt in formats:
             try:
-                return datetime.strptime(text[:10], fmt).date()
+                value = text[:10] if fmt in formats[:5] else text
+                return datetime.strptime(value, fmt).date()
             except ValueError:
                 continue
         return None

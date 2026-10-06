@@ -34,8 +34,10 @@ ROW_METADATA = {"row_reference", "member_ref", "member_reference", "errors", "st
 
 class EmailHTMLText(HTMLParser):
     """Preserve editable table cells while discarding common quoted HTML replies."""
-    def __init__(self):
+    def __init__(self, include_quotes=False):
         super().__init__(convert_charrefs=True)
+        self.include_quotes = include_quotes
+        self.outlook_quote = False
         self.chunks = []
         self.quote_depth = 0
         self.quote_tag = ""
@@ -44,7 +46,13 @@ class EmailHTMLText(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
-        quoted = tag in {"blockquote", "script", "style"} or any(x in values.get("class", "") for x in ("gmail_quote", "yahoo_quoted")) or values.get("id") in {"divRplyFwdMsg", "appendonsend"}
+        # Outlook's reply marker contains only its header; the old body follows
+        # as siblings, so suppress the remainder as well as the marker itself.
+        if not self.include_quotes and values.get("id") in {"divRplyFwdMsg", "appendonsend"}:
+            self.outlook_quote = True
+        if self.outlook_quote:
+            return
+        quoted = tag in {"script", "style"} or (not self.include_quotes and (tag == "blockquote" or any(x in values.get("class", "") for x in ("gmail_quote", "yahoo_quoted"))))
         if self.quote_depth:
             if tag == self.quote_tag:
                 self.quote_depth += 1
@@ -60,6 +68,8 @@ class EmailHTMLText(HTMLParser):
             (self.cell if self.cell is not None else self.chunks).append(" " if self.cell is not None else "\n")
 
     def handle_endtag(self, tag):
+        if self.outlook_quote:
+            return
         if self.quote_depth:
             if tag == self.quote_tag:
                 self.quote_depth -= 1
@@ -74,10 +84,10 @@ class EmailHTMLText(HTMLParser):
             self.chunks.append(out.getvalue())
             self.row = None
         elif tag in {"p", "div", "table", "h1", "h2", "h3", "h4"}:
-            self.chunks.append("\n")
+            (self.cell if self.cell is not None else self.chunks).append(" " if self.cell is not None else "\n")
 
     def handle_data(self, data):
-        if self.quote_depth:
+        if self.quote_depth or self.outlook_quote:
             return
         if self.cell is None and not data.strip():
             return
@@ -94,6 +104,23 @@ def current_reply_text(text):
     return "\n".join(lines).strip()
 
 
+def _message_text(message, include_quotes=False):
+    # Outlook's plain alternative places each cell on a separate line. HTML
+    # retains column boundaries and must take precedence for editable tables.
+    body = message.get_body(preferencelist=("html", "plain"))
+    if not body:
+        return ""
+    try:
+        text = body.get_content()
+    except (UnicodeError, LookupError):
+        text = (body.get_payload(decode=True) or b"").decode("utf-8", errors="replace")
+    if body.get_content_type() == "text/html":
+        parser = EmailHTMLText(include_quotes=include_quotes)
+        parser.feed(text)
+        text = "".join(parser.chunks)
+    return text
+
+
 def ingest_message(mailbox, raw, uid):
     message = BytesParser(policy=email_policy.default).parsebytes(raw)
     senders = getaddresses(message.get_all("From", []))
@@ -102,17 +129,7 @@ def ingest_message(mailbox, raw, uid):
     existing = InboundEmail.objects.filter(mailbox=mailbox).filter(Q(message_uid=str(uid)) | (Q(message_id=message_id) if message_id else Q(pk=None))).first()
     if existing:
         return existing
-    body = message.get_body(preferencelist=("plain", "html"))
-    text = ""
-    if body:
-        try:
-            text = body.get_content()
-        except (UnicodeError, LookupError):
-            text = body.get_payload(decode=True).decode("utf-8", errors="replace")
-        if body.get_content_type() == "text/html":
-            parser = EmailHTMLText()
-            parser.feed(text)
-            text = "".join(parser.chunks)
+    text = _message_text(message)
     try:
         received = parsedate_to_datetime(str(message.get("Date", "")))
         if timezone.is_naive(received):
@@ -279,6 +296,104 @@ def _row_reference(row):
     return ""
 
 
+def _canonical_values(row):
+    values = FileIntakeService._normalize_ai_row(row)
+    result = {}
+    for key in CANONICAL_FIELDS:
+        value = values.get(key)
+        if value not in (None, "", "[CLEAR]"):
+            if key in {"date_of_birth", "effective_date"}:
+                parsed = FileIntakeService._date(value)
+                value = parsed.isoformat() if parsed else value
+            elif key in {"annual_salary", "sum_assured"}:
+                parsed = FileIntakeService._decimal(value)
+                value = str(parsed.normalize()) if parsed is not None else value
+        result[key] = str(value).strip() if value is not None else ""
+    return result
+
+
+def _reply_rows(email, root):
+    """Read authored rows and deliberate changes in quoted correction tables."""
+    full_text = ""
+    if email.raw_message:
+        with email.raw_message.open("rb") as source:
+            message = BytesParser(policy=email_policy.default).parsebytes(source.read())
+        # Rebuild stored text as well, so Admin retry repairs pre-upgrade intake.
+        email.body_text = current_reply_text(_message_text(message))
+        full_text = _message_text(message, include_quotes=True)
+    rows = _structured_body(email.body_text)
+    if email.pk == root.pk or not full_text:
+        return rows
+    snapshots = {}
+    replies = EmailReply.objects.filter(Q(email_id=root.pk) | Q(email__thread=root), email_id__lt=email.pk).order_by("-email_id")
+    for reply in replies.only("correction_csv"):
+        for previous in csv.DictReader(io.StringIO(reply.correction_csv)):
+            snapshots.setdefault(_row_reference(previous), []).append(_canonical_values(previous))
+    seen = {(_row_reference(row), tuple(_canonical_values(row).items())) for row in rows}
+    for row in _structured_body(full_text):
+        ref, values = _row_reference(row), _canonical_values(row)
+        signature = (ref, tuple(values.items()))
+        if signature in seen or not re.fullmatch(r"(?:ITEM-\d+|DOC-\d+|NEW)", ref):
+            continue
+        if ref != "NEW" and ref not in snapshots:
+            continue
+        supplied = {key: value for key, value in values.items() if value}
+        if not supplied or any(all(previous.get(key) == value for key, value in supplied.items()) for previous in snapshots.get(ref, [])):
+            continue
+        # Compare with the closest outbound snapshot and apply only edited
+        # fields. Other cells in an older quoted table may now be out of date.
+        previous = max(snapshots.get(ref, [{}]), key=lambda snapshot: sum(snapshot.get(key) == value for key, value in supplied.items()))
+        normalized = FileIntakeService._normalize_ai_row(row)
+        rows.append({"row_reference": ref, **{key: normalized.get(key) for key, value in supplied.items() if previous.get(key) != value}})
+        seen.add(signature)
+    return rows
+
+
+def _intake_evidence(email, root, request):
+    current = list(email.evidence.select_related("attachment"))
+    if request or root.pk == email.pk:
+        return current
+    # Files received while required request headers were missing have not yet
+    # become attachments. Keep them when a later authorized reply fills headers.
+    names = {item.original_name.casefold() for item in current}
+    pending = EmailEvidence.objects.filter(
+        Q(email_id=root.pk) | Q(email__thread=root), email_id__lt=email.pk,
+        email__policy=email.policy, email__authority__organization=email.authority.organization,
+        attachment__isnull=True,
+    ).select_related("attachment").order_by("email_id", "pk")
+    latest = {item.original_name.casefold(): item for item in pending if item.original_name.casefold() not in names}
+    return sorted(latest.values(), key=lambda item: (item.email_id, item.pk)) + current
+
+
+def _structured_evidence(evidence):
+    readers = {".csv": FileIntakeService._csv_rows, ".xlsx": FileIntakeService._xlsx_rows, ".xls": FileIntakeService._xls_rows}
+    cached = {}
+    for item in evidence:
+        reader = readers.get(Path(item.original_name).suffix.lower())
+        if reader:
+            try:
+                cached[item.pk] = reader(item.file.path)
+            except Exception:
+                # Normal attachment processing reports unreadable files after
+                # the request headers are supplied; they cannot supply a date.
+                continue
+    return cached
+
+
+def _rows_effective_date(rows):
+    dates = set()
+    for row in rows:
+        value = FileIntakeService._normalize_ai_row(row).get("effective_date")
+        if value not in (None, "", "[CLEAR]"):
+            parsed = FileIntakeService._date(value)
+            if not parsed:
+                raise ValueError("Invalid effective date in member details. Use YYYY-MM-DD or a date such as 6-Oct-2026.")
+            dates.add(parsed)
+    if len(dates) > 1:
+        raise ValueError("Multiple member effective dates were supplied. Specify the request's Effective date above the tables or send separate endorsements.")
+    return next(iter(dates), None)
+
+
 def _match_row(request, row, is_correction=False):
     ref = _row_reference(row)
     if ref.startswith("ITEM-"):
@@ -426,7 +541,7 @@ def _identity_details(email, root, request):
     endorsement_type = EndorsementRequest.Type.DELETION if deletion else EndorsementRequest.Type.ADDITION if addition else ""
     if not endorsement_type and root:
         endorsement_type = root.extracted_payload.get("endorsement_type", "")
-    date_match = re.search(r"(?:effective[_ ]date|effective from|with effect from)\s*[:=]?\s*(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", text, re.I)
+    date_match = re.search(r"(?:effective[_ ]date|effective from|with effect from)\s*[:=]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}|\d{1,2}[- ](?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[- ](?:\d{4}|\d{2})\b)", text, re.I)
     effective = FileIntakeService._date(date_match.group(1)) if date_match else None
     if not effective and root:
         effective = FileIntakeService._date(root.extracted_payload.get("effective_date"))
@@ -502,6 +617,16 @@ def process_email(email_id, force=False, recheck_authorization=False):
             raise ValueError("A newer email correction has already been processed. Reprocess the latest reply instead.")
         if request and request.status not in {EndorsementRequest.Status.DRAFT, EndorsementRequest.Status.NEEDS_INFO}:
             raise ValueError("This endorsement has already left intake/correction. Staff must reopen it before applying a reply.")
+        rows = _reply_rows(email, root)
+        evidence_items = _intake_evidence(email, root, request)
+        structured_files = _structured_evidence(evidence_items)
+        if not request and root.pk != email.pk and root.authority_id and root.policy_id == policy.pk and root.authority.organization_id == authority.organization_id:
+            rows = _structured_body(root.body_text) + rows
+        if not effective:
+            effective = _rows_effective_date([*rows, *(row for file_rows in structured_files.values() for row in file_rows)])
+            email.extracted_payload["effective_date"] = effective.isoformat() if effective else None
+            if effective:
+                email.extracted_payload["effective_date_source"] = "member_details"
         missing = [label for label, value in (("endorsement type (Addition or Deletion)", endorsement_type), ("effective date (YYYY-MM-DD)", effective)) if not value]
         if missing:
             email.processing_state = InboundEmail.State.NEEDS_INFO
@@ -516,7 +641,6 @@ def process_email(email_id, force=False, recheck_authorization=False):
             root.save(update_fields=["endorsement", "policy", "updated_at"])
         email.endorsement = request
         email.save()
-        rows = _structured_body(email.body_text)
         extraction_errors = []
         if not rows and re.search(r"\b(?:member[_ ]?(?:ref|no|name)|full[_ ]name|date[_ ]of[_ ]birth|\bdob\b|employee[_ ](?:id|no))\b", email.body_text, re.I):
             try:
@@ -526,7 +650,7 @@ def process_email(email_id, force=False, recheck_authorization=False):
                     raise ValueError("No member rows were extracted from the email body.")
             except Exception as exc:
                 extraction_errors.append("Email body extraction failed: " + str(exc))
-        for evidence in email.evidence.all():
+        for evidence in evidence_items:
             attachment = evidence.attachment
             if not attachment:
                 attachment = Attachment(request=request, original_name=evidence.original_name, kind=FileIntakeService.kind_for_name(evidence.original_name), is_supplemental=bool(email.thread_id))
@@ -535,7 +659,14 @@ def process_email(email_id, force=False, recheck_authorization=False):
                 evidence.attachment = attachment
                 evidence.save(update_fields=["attachment", "updated_at"])
             try:
-                raw, normalized, metadata = FileIntakeService._extract(attachment)
+                if evidence.pk in structured_files:
+                    raw = structured_files[evidence.pk]
+                    payload = [{key: value for key, value in row.items() if FileIntakeService._map_header(key) not in ROW_METADATA} for row in raw]
+                    ai = FileIntakeService._ai_for_request(request)
+                    normalized, ai_used = FileIntakeService._normalize_structured(payload, ai)
+                    metadata = {"method": Path(evidence.original_name).suffix.lower().lstrip("."), "ai_header_mapping": ai_used, "ai_profile": ai.last_profile_name if ai_used else None}
+                else:
+                    raw, normalized, metadata = FileIntakeService._extract(attachment)
                 for raw_row, normalized_row in zip(raw, normalized):
                     normalized_row["_source_raw"] = raw_row
                 rows.extend(normalized)
@@ -613,6 +744,8 @@ def queue_reply(email):
         if title.startswith("Error"):
             lines.extend(["", f"ERROR MEMBERS / NEEDS CORRECTION ({len(incorrect)})"])
         html_parts.append(f"<h3>{escape(title)} ({len(group)})</h3><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font:13px Arial\"><thead><tr>" + "".join(f"<th>{escape(c)}</th>" for c in columns) + "</tr></thead><tbody>")
+        if group:
+            lines.append(" | ".join(columns))
         for item in group:
             row = _member_row(item)
             values = [row[key] for key in ("row_reference", "member_no", "employee_no", "national_id", "full_name", "date_of_birth", "gender", "relationship", "plan_code", "annual_salary", "sum_assured", "effective_date")]
@@ -644,6 +777,8 @@ def queue_reply(email):
         writer.writerow({"row_reference": f"DOC-{attachment.pk}"})
     if not items and not failed:
         writer.writerow({"row_reference": "NEW"})
+        lines.extend(["", "NEW MEMBER DETAILS", "Fill the CSV attachment or the new member table, including effective_date. Dates may use YYYY-MM-DD or 6-Oct-2026."])
+        html_parts.append("<h3>New member details</h3><p>Fill the CSV attachment or this table, including effective_date. Dates may use YYYY-MM-DD or 6-Oct-2026. Keep NEW as the row reference.</p><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\"><tr>" + "".join(f"<th>{escape(field)}</th>" for field in ROW_FIELDS) + "</tr><tr><td>NEW</td>" + "<td></td>" * (len(ROW_FIELDS) - 1) + "</tr></table>")
     content = {"subject": subject, "body_text": "\n".join(lines), "body_html": "".join(html_parts), "correction_csv": output.getvalue()}
     reply, created = EmailReply.objects.get_or_create(email=email, defaults={**content, "message_id": make_msgid(domain=email.mailbox.email_address.rsplit("@", 1)[-1])})
     if not created and not reply.sent_at:

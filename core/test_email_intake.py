@@ -8,6 +8,7 @@ from datetime import timedelta
 from email.message import EmailMessage
 from email import policy as email_policy
 from email.parser import BytesParser
+from html import escape
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -52,7 +53,7 @@ class EmailCorrectionTests(BaseInsuranceTest):
     def row(self, **updates):
         return {"employee_no": "E1", "full_name": "Correct Member", "date_of_birth": "1990-01-01", "gender": "Male", "relationship": "Employee", "plan_code": self.plan.code, **updates}
 
-    def receive(self, body="", subject=None, sender=None, files=(), authenticate=True, html=False):
+    def receive(self, body="", subject=None, sender=None, files=(), authenticate=True, html=False, alternative_html=None):
         self.counter += 1
         message = EmailMessage()
         message["From"] = sender or self.requester.email
@@ -63,6 +64,8 @@ class EmailCorrectionTests(BaseInsuranceTest):
             domain = (sender or self.requester.email).rsplit("@", 1)[1]
             message["Authentication-Results"] = f"mx.insurer.example; dmarc=pass header.from={domain}"
         message.set_content(body, subtype="html" if html else "plain")
+        if alternative_html is not None:
+            message.add_alternative(alternative_html, subtype="html")
         for name, content in files:
             message.add_attachment(content, maintype="application", subtype="octet-stream", filename=name)
         return ingest_message(self.mailbox, message.as_bytes(), str(self.counter))
@@ -464,6 +467,169 @@ class EmailCorrectionTests(BaseInsuranceTest):
         self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
         original.refresh_from_db()
         self.assertEqual(original.endorsement_id, result.endorsement_id)
+
+    def member_table(self, rows):
+        columns = list(rows[0])
+        def cell(tag, value):
+            return f'<{tag}><p class="MsoNormal"><span>{escape(str(value or ""))}</span></p></{tag}>'
+        return "<table><tr>" + "".join(cell("th", key) for key in columns) + "</tr>" + "".join("<tr>" + "".join(cell("td", row.get(key)) for key in columns) + "</tr>" for row in rows) + "</table>"
+
+    def pending_headers(self, files=()):
+        result = process_email(self.receive("Please add the members.", files=files).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.NEEDS_INFO)
+        self.assertIsNone(result.endorsement_id)
+        return result
+
+    def csv_content(self, rows):
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+        return output.getvalue().encode()
+
+    def test_filled_csv_supplies_missing_request_date_without_an_ai_model(self):
+        original = self.pending_headers()
+        row = self.row(row_reference="NEW", relationship="Parent", date_of_birth="1-Jun-91", effective_date=self.today.strftime("%d-%b-%y"))
+        with patch.object(AIService, "normalize_structured_rows", side_effect=AssertionError("Canonical correction CSV must not need AI")):
+            email = self.receive("PFA", subject=f"Re: [SE: {original.reference}] Addition", files=[(f"corrections-{original.reference}.csv", self.csv_content([row]))])
+            result = process_email(email.pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.effective_date, self.today)
+        item = result.endorsement.items.get()
+        self.assertEqual(item.date_of_birth.isoformat(), "1991-06-01")
+        self.assertEqual(item.relationship, "Parent")
+        self.assertEqual(item.effective_date, self.today)
+        self.assertEqual(result.endorsement.attachments.count(), 1)
+
+    def test_outlook_inline_table_supplies_missing_date_inside_quoted_reply(self):
+        original = self.pending_headers()
+        row = self.row(row_reference="NEW", date_of_birth="1-Jun-91", effective_date=self.today.strftime("%d-%b-%y"))
+        html = '<p>Please find the updated details.</p><div><p><b>From:</b> Intake</p></div>' + self.member_table([row])
+        # Outlook's plain-text alternative loses the table's column boundaries.
+        plain = "Please find the updated details.\nFrom: Intake\n" + "\n\n".join([*row.keys(), *row.values()])
+        email = self.receive(plain, alternative_html=html, subject=f"Re: [SE: {original.reference}] Addition")
+        result = process_email(email.pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.effective_date, self.today)
+        self.assertEqual(result.endorsement.items.count(), 1)
+        self.assertEqual(result.endorsement.items.get().date_of_birth.isoformat(), "1991-06-01")
+        self.assertEqual(result.body_text, "Please find the updated details.")
+
+    def test_multipart_html_table_takes_precedence_over_flattened_plain_text(self):
+        row = self.row(effective_date=self.today.isoformat())
+        email = self.receive("\n\n".join([*row.keys(), *row.values()]), alternative_html=self.member_table([row]))
+        result = process_email(email.pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.get().full_name, "Correct Member")
+
+    def test_edited_outlook_quote_updates_accepted_and_error_members(self):
+        original = self.initial()
+        correct, error = original.endorsement.items.order_by("pk")
+        rows = list(csv.DictReader(io.StringIO(original.reply.correction_csv)))
+        rows[0]["full_name"] = "Edited Accepted Member"
+        rows[1]["date_of_birth"] = "2-Feb-1992"
+        html = '<p>Updated below.</p><div id="divRplyFwdMsg">From: Intake</div>' + self.member_table(rows)
+        result = process_email(self.receive("Updated below.", alternative_html=html, subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.body_text, "Updated below.")
+        correct.refresh_from_db(); error.refresh_from_db()
+        self.assertEqual(correct.full_name, "Edited Accepted Member")
+        self.assertEqual(error.date_of_birth.isoformat(), "1992-02-02")
+        self.assertEqual(result.endorsement.items.count(), 2)
+
+    def test_unchanged_historical_quoted_tables_cannot_revert_newer_changes(self):
+        original = self.initial(rows=[self.row()])
+        old_table = self.member_table(list(csv.DictReader(io.StringIO(original.reply.correction_csv))))
+        item = original.endorsement.items.get()
+        correction = self.receive("BEGIN MEMBERS\n" + json.dumps([{"row_reference": f"ITEM-{item.pk}", "full_name": "Latest Name"}]) + "\nEND MEMBERS", subject=f"Re: {original.reference}")
+        latest = process_email(correction.pk)
+        new_table = self.member_table(list(csv.DictReader(io.StringIO(latest.reply.correction_csv))))
+        html = '<p>Thanks.</p><blockquote>' + new_table + '<blockquote>' + old_table + '</blockquote></blockquote>'
+        result = process_email(self.receive("Thanks.", alternative_html=html, subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.extracted_payload["summary"]["changed"], 0)
+        item.refresh_from_db()
+        self.assertEqual(item.full_name, "Latest Name")
+
+    def test_original_attachment_is_retained_when_reply_supplies_missing_header(self):
+        original = self.pending_headers(files=[("members.csv", self.csv_content([self.row()]))])
+        result = process_email(self.receive(f"Effective date: {self.today.isoformat()}", subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.count(), 1)
+        self.assertEqual(result.endorsement.attachments.count(), 1)
+        self.assertIsNotNone(original.evidence.get().attachment_id)
+
+    def test_editing_one_cell_in_older_quote_preserves_newer_changes_to_other_cells(self):
+        original = self.initial(rows=[self.row()])
+        old_rows = list(csv.DictReader(io.StringIO(original.reply.correction_csv)))
+        item = original.endorsement.items.get()
+        correction = self.receive("BEGIN MEMBERS\n" + json.dumps([{"row_reference": f"ITEM-{item.pk}", "full_name": "Latest Name"}]) + "\nEND MEMBERS", subject=f"Re: {original.reference}")
+        self.assertEqual(process_email(correction.pk).processing_state, InboundEmail.State.PROCESSED)
+        old_rows[0]["date_of_birth"] = "2-Feb-1992"
+        html = '<p>Date corrected below.</p><blockquote>' + self.member_table(old_rows) + '</blockquote>'
+        result = process_email(self.receive("Date corrected below.", alternative_html=html, subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        item.refresh_from_db()
+        self.assertEqual(item.full_name, "Latest Name")
+        self.assertEqual(item.date_of_birth.isoformat(), "1992-02-02")
+
+    def test_returned_file_replaces_pending_original_with_same_filename(self):
+        original = self.pending_headers(files=[("members.csv", self.csv_content([self.row(full_name="Old Name")]))])
+        updated = self.row(full_name="Updated Name", effective_date=self.today.isoformat())
+        result = process_email(self.receive("PFA", subject=f"Re: {original.reference}", files=[("members.csv", self.csv_content([updated]))]).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.get().full_name, "Updated Name")
+        self.assertEqual(result.endorsement.attachments.count(), 1)
+
+    def test_original_body_rows_are_retained_when_reply_only_supplies_date(self):
+        original = process_email(self.receive("BEGIN MEMBERS\n" + json.dumps([self.row()]) + "\nEND MEMBERS").pk)
+        self.assertIsNone(original.endorsement_id)
+        result = process_email(self.receive(f"Effective date: {self.today.isoformat()}", subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.count(), 1)
+
+    def test_header_only_reply_uses_latest_pending_version_of_each_file(self):
+        original = self.pending_headers(files=[("members.csv", self.csv_content([self.row(full_name="Old Name")]))])
+        corrected = process_email(self.receive("PFA", subject=f"Re: {original.reference}", files=[("members.csv", self.csv_content([self.row(full_name="Latest Name")]))]).pk)
+        self.assertEqual(corrected.processing_state, InboundEmail.State.NEEDS_INFO)
+        self.assertIsNone(corrected.endorsement_id)
+        result = process_email(self.receive(f"Effective date: {self.today.isoformat()}", subject=f"Re: {original.reference}").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.get().full_name, "Latest Name")
+        self.assertEqual(result.endorsement.attachments.count(), 1)
+
+    def test_different_row_dates_require_explicit_request_date(self):
+        original = self.pending_headers()
+        rows = [self.row(effective_date=self.today.isoformat()), self.row(employee_no="E2", effective_date=(self.today + timedelta(days=1)).isoformat())]
+        result = process_email(self.receive("PFA", subject=f"Re: {original.reference}", files=[("members.csv", self.csv_content(rows))]).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.NEEDS_REVIEW)
+        self.assertIsNone(result.endorsement_id)
+        self.assertIn("Multiple member effective dates", result.processing_error)
+
+    def test_invalid_row_date_reports_the_field_instead_of_asking_again(self):
+        original = self.pending_headers()
+        result = process_email(self.receive("PFA", subject=f"Re: {original.reference}", files=[("members.csv", self.csv_content([self.row(effective_date="32-Oct-26")]))]).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.NEEDS_REVIEW)
+        self.assertIsNone(result.endorsement_id)
+        self.assertIn("Invalid effective date in member details", result.processing_error)
+
+    def test_authorization_precedes_reading_reply_tables_and_attachments(self):
+        original = self.pending_headers()
+        with patch("core.email_intake._reply_rows") as body_reader, patch("core.email_intake._structured_evidence") as file_reader:
+            result = process_email(self.receive("PFA", subject=f"Re: {original.reference}", sender="intruder@client.example", files=[("members.csv", self.csv_content([self.row(effective_date=self.today.isoformat())]))]).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+        body_reader.assert_not_called()
+        file_reader.assert_not_called()
+
+    def test_admin_retry_rebuilds_html_from_saved_mime(self):
+        row = self.row(effective_date=self.today.isoformat())
+        email = self.receive("flattened body", alternative_html=self.member_table([row]))
+        email.body_text = "flattened body"
+        email.processing_state = InboundEmail.State.NEEDS_INFO
+        email.save()
+        result = process_email(email.pk, force=True)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.items.count(), 1)
 
     def test_completed_or_dispatched_request_is_not_changed_by_late_reply(self):
         original = self.initial(rows=[self.row()])
