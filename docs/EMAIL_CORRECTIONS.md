@@ -34,15 +34,33 @@ Create **Email authorities** with one identity per grant:
 
 | Identity | Requirement |
 | --- | --- |
-| Exact email address | Case-insensitive exact match; no domain wildcards. Set a processing user if there is no matching portal user. |
+| Exact email address | Case-insensitive exact match; surrounding whitespace is ignored. Set an eligible processing user if there is no unique matching portal user. An explicitly selected processing user takes precedence over the sender's own portal account. |
 | Portal user | The active user's email is the sender identity. |
 | Django group | The sender must uniquely match an active portal user who is currently in the selected group. |
 
 Each grant names a policy, organization, allowed endorsement types and optional validity dates. The processing user must be active, belong to the grant organization and have endorsement creation access for that policy. Add a **Policy access** grant for client/broker organizations. A deactivated user, inactive organization or expired/revoked grant cannot process or receive sensitive replies. Validity is evaluated on the current processing date, not an untrusted email Date header. The original requester organization and insurer organization may correct the same request when authorized; another client's grant cannot change it.
 
+Admin checks the fixed workflow user before saving an active email/user grant. Group grants use each sender's own active portal identity and permissions; a processing user does not delegate access to group members. **Grant configuration** on the Email authorities list/change page identifies incomplete or ineligible existing grants. Inactive grants can be saved as drafts.
+
+### An authorized address is still blocked
+
+Open **Admin > Inbound emails > the message > Processing error** (or its portal detail page) for the actual reason. The list also shows a short reason and distinguishes **Sender verification failed** from **Unauthorized sender**.
+
+| Reason | Admin setting to check |
+| --- | --- |
+| No Email authority matches From address / policy | Match the actual From address, the portal user's Email or current group membership; select the same policy and enable Active. Reply-To addresses and aliases are not inferred. |
+| Workflow user is missing, inactive or has an ineligible role | Select an active **Processing user** for an exact-address grant, or update the sender's **User profile** for user/group grants. |
+| Workflow user belongs to another organization / has no policy creation access | Match the grant organization; add **Policy access** with **Can create** for client/broker organizations. |
+| Grant is expired, not yet valid or does not permit the transaction | Check **Valid from**, **Valid until**, **Active** and **Permitted types**. |
+| Sender verification failed | Check **Mailbox configurations > Sender verification**. A policy grant does not supply a DMARC pass or make an untrusted header trustworthy. |
+
+Microsoft 365 commonly reports `Authentication-Results` without an authserv-id ([Microsoft header examples](https://learn.microsoft.com/en-us/defender-office-365/message-headers-eop-mdo)). Such a result cannot be matched against **Trusted authserv IDs**; Graph API access itself does not prove the sender's identity. For the strict DMARC option, configure a trusted receiving gateway to provide an identified, aligned result and strip forged headers. Where the receiving mail gateway already verifies senders, you can uncheck **Require sender authentication** in this mailbox's Admin settings; policy-scoped address/user/group grants and workflow permissions remain enforced. The application does not automatically disable this check.
+
+After you add or fix a grant, active mailboxes automatically recheck previously blocked emails on scheduled polls. Rechecks also pick up changes to user/group membership, policy access and mailbox verification settings. Checks are bounded and rotate through older blocked messages; new mail is processed independently. Already processed messages are not replayed by this retry stage. Use **Recheck authorization and retry email extraction** in Admin, or **Recheck and process** on a permitted portal detail page, for an immediate check. Retry messages report the resulting status rather than claiming that a still-blocked email was processed successfully.
+
 ## Start the worker
 
-APScheduler starts automatically with local DEBUG/runserver. Set `EMAIL_INTAKE_AUTOSTART=1` explicitly to enable it and `EMAIL_INTAKE_POLL_SECONDS=30` to control the interval. The first poll runs immediately; subsequent cycles pull new emails, process stored pending messages and retry unsent replies. `EMAIL_INTAKE_BATCH_SIZE=50` limits each stage per correction mailbox.
+APScheduler starts automatically with local DEBUG/runserver. Set `EMAIL_INTAKE_AUTOSTART=1` explicitly to enable it and `EMAIL_INTAKE_POLL_SECONDS=30` to control the interval. The first poll runs immediately; subsequent cycles pull new emails, process stored pending messages, recheck blocked senders and retry unsent replies. `EMAIL_INTAKE_BATCH_SIZE=50` limits each stage per correction mailbox. Poll statistics include `rechecked` for blocked emails examined again, separately from newly pending emails processed.
 
 For production, set `EMAIL_INTAKE_AUTOSTART=0` on web processes and run the dedicated scheduler as a separate service:
 

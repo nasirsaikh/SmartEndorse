@@ -17,11 +17,11 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .access import accessible_policies, can_create_endorsement
+from .email_authorization import authority_decision, resolve_authority
 from .ai import CANONICAL_FIELDS
 from .models import (
     Attachment, EmailAuthority, EmailEvidence, EmailReply, EndorsementItem,
-    EndorsementRequest, InboundEmail, Policy, User, WorkflowEvent,
+    EndorsementRequest, InboundEmail, Policy, WorkflowEvent,
 )
 from .services import FileIntakeService, PricingEngine, ValidationService, WorkflowService, json_safe, platform_config
 
@@ -146,52 +146,88 @@ def ingest_message(mailbox, raw, uid):
     return obj
 
 
-def authenticated_sender(email):
+def _authentication_clauses(header):
+    """Split Authentication-Results without treating comments/quoted text as results."""
+    clauses, chars = [], []
+    depth, quoted, escaped = 0, False, False
+    for char in str(header):
+        if escaped:
+            if not depth:
+                chars.append(char)
+            escaped = False
+        elif char == "\\" and (depth or quoted):
+            if not depth:
+                chars.append(char)
+            escaped = True
+        elif depth:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+        elif char == '"':
+            quoted = not quoted
+            chars.append(char)
+        elif char == "(" and not quoted:
+            depth = 1
+            chars.append(" ")
+        elif char == ";" and not quoted:
+            clauses.append("".join(chars).strip())
+            chars = []
+        else:
+            chars.append(char)
+    return [] if depth or quoted or escaped else [*clauses, "".join(chars).strip()]
+
+
+def sender_authentication_error(email):
+    if "@" not in email.sender:
+        return "Sender verification failed: the email must contain exactly one valid From address."
     mailbox = email.mailbox
     if not mailbox.require_sender_authentication:
-        return True
-    trusted = {str(x).casefold().rstrip(".") for x in mailbox.trusted_authserv_ids}
-    if not trusted or "@" not in email.sender:
-        return False
-    domain = email.sender.rsplit("@", 1)[1].casefold()
-    for result in email.headers.get("authentication-results", []):
-        authserv = result.split(";", 1)[0].strip().split()[0].casefold().rstrip(".") if result.strip() else ""
+        return ""
+    trusted = {str(x).strip().casefold().rstrip(".") for x in mailbox.trusted_authserv_ids if str(x).strip()}
+    settings_hint = "Review Sender verification in Admin > Mailbox configurations. Email authorities control policy permission separately."
+    if not trusted:
+        return f"Sender verification failed: Trusted authserv IDs is empty. {settings_hint}"
+    results = email.headers.get("authentication-results", [])
+    if not results:
+        return f"Sender verification failed: this email has no Authentication-Results header, but this mailbox requires a trusted DMARC pass. {settings_hint}"
+    domain = email.sender.rsplit("@", 1)[1].strip().casefold().rstrip(".")
+    trusted_found, observed, unidentified = False, set(), False
+    for result in results:
+        clauses = _authentication_clauses(result)
+        if not clauses:
+            continue
+        identifier = re.fullmatch(r'(?:"([^"\\]+)"|([^\s=;]+))(?:\s+\d+)?', clauses[0])
+        if not identifier:
+            unidentified = True
+            continue
+        authserv = (identifier.group(1) or identifier.group(2)).casefold().rstrip(".")
+        observed.add(authserv)
         if authserv not in trusted:
             continue
-        # The receiving server has checked alignment with the RFC5322 From domain.
-        for clause in result.split(";")[1:]:
-            if re.search(r"\bdmarc\s*=\s*pass\b", clause, re.I):
-                match = re.search(r"header\.from\s*=\s*([\w.\-]+)", clause, re.I)
-                if match and match.group(1).casefold().rstrip(".") == domain.rstrip("."):
-                    return True
-    return False
+        trusted_found = True
+        for clause in clauses[1:]:
+            if not re.match(r"^dmarc(?:/\d+)?\s*=\s*pass(?:\s|$)", clause, re.I):
+                continue
+            # Consume entire quoted values so a reason="header.from=..." cannot
+            # be confused with the actual property of a successful DMARC check.
+            properties = {match.group(1).casefold(): match.group(2).strip('"').casefold().rstrip(".") for match in re.finditer(
+                r'(?:^|\s)([\w.\-]+)\s*=\s*("(?:\\.|[^"\\])*"|[^\s]+)', clause,
+            )}
+            if properties.get("header.from") == domain:
+                return ""
+    if trusted_found:
+        return f"Sender verification failed: the trusted receiving server did not report dmarc=pass aligned with From domain {domain}. {settings_hint}"
+    if unidentified:
+        return ("Sender verification failed: Authentication-Results has no receiving server ID (as in Microsoft 365 headers). "
+                "This mailbox requires an identified trusted DMARC result. Configure your gateway to supply that result, "
+                "or disable Require sender authentication in Admin only when your mail gateway already verifies senders. "
+                "An active Email authority is still required.")
+    return f"Sender verification failed: no Authentication-Results server matches Trusted authserv IDs. Observed: {', '.join(sorted(observed)) or 'none'}. {settings_hint}"
 
 
-def resolve_authority(sender, policy, endorsement_type=""):
-    today = timezone.localdate()
-    users = list(User.objects.filter(email__iexact=sender, is_active=True).select_related("profile__organization")[:2])
-    sender_user = users[0] if len(users) == 1 else None
-    identities = Q(email_address__iexact=sender)
-    if sender_user:
-        identities |= Q(user=sender_user) | Q(group__in=sender_user.groups.all())
-    candidates = EmailAuthority.objects.filter(identities, policy=policy, is_active=True, organization__is_active=True).filter(
-        Q(valid_from=None) | Q(valid_from__lte=today), Q(valid_until=None) | Q(valid_until__gte=today),
-    ).select_related("organization", "user", "processing_user").order_by("pk")
-    for authority in candidates:
-        if endorsement_type and authority.permitted_types and endorsement_type not in authority.permitted_types:
-            continue
-        actor = authority.user if authority.user_id else sender_user or authority.processing_user
-        if not actor or not actor.is_active or not can_create_endorsement(actor):
-            continue
-        if hasattr(actor, "profile") and actor.profile.organization_id != authority.organization_id:
-            continue
-        if not accessible_policies(actor, require_create=True).filter(pk=policy.pk).exists():
-            continue
-        # A deactivated portal identity cannot bypass deactivation through an external-email grant.
-        if User.objects.filter(email__iexact=sender, is_active=False).exists():
-            continue
-        return authority, actor
-    return None, None
+def authenticated_sender(email):
+    return not sender_authentication_error(email)
 
 
 def _structured_body(text):
@@ -396,9 +432,9 @@ def _identity_details(email, root, request):
 
 
 @transaction.atomic
-def process_email(email_id, force=False):
+def process_email(email_id, force=False, recheck_authorization=False):
     email = InboundEmail.objects.select_for_update().select_related("mailbox", "thread", "endorsement__policy", "policy").get(pk=email_id)
-    if email.processing_state != InboundEmail.State.RECEIVED and not force:
+    if email.processing_state != InboundEmail.State.RECEIVED and not force and not (recheck_authorization and email.processing_state == InboundEmail.State.UNAUTHORIZED):
         return email
     if any(value.lower() not in {"no", ""} for value in email.headers.get("auto-submitted", [])) or email.headers.get("x-autoreply") or any("bulk" in value.lower() for value in email.headers.get("precedence", [])) or email.sender.casefold() == email.mailbox.email_address.casefold():
         email.processing_state = InboundEmail.State.IGNORED
@@ -434,9 +470,10 @@ def process_email(email_id, force=False):
         if request:
             request = EndorsementRequest.objects.select_for_update().select_related("policy").get(pk=request.pk)
         policy, endorsement_type, effective = _identity_details(email, root, request)
-        if not email.sender or not authenticated_sender(email):
+        authentication_error = sender_authentication_error(email)
+        if authentication_error:
             email.processing_state = InboundEmail.State.UNAUTHORIZED
-            email.processing_error = "Sender authentication failed. No member data was applied or disclosed."
+            email.processing_error = authentication_error
             email.save()
             return email
         # An unknown policy may be resolved only within an active, explicitly granted scope.
@@ -444,12 +481,13 @@ def process_email(email_id, force=False):
             permitted = {a.policy_id for a in EmailAuthority.objects.filter(is_active=True) if resolve_authority(email.sender, a.policy, endorsement_type)[0]}
             if len(permitted) == 1:
                 policy = Policy.objects.get(pk=next(iter(permitted)))
-        authority, actor = resolve_authority(email.sender, policy, endorsement_type) if policy else (None, None)
-        if not authority:
+        decision = authority_decision(email.sender, policy, endorsement_type)
+        if not decision.authority:
             email.processing_state = InboundEmail.State.UNAUTHORIZED
-            email.processing_error = "Sender is not authorized for this policy and endorsement type."
+            email.processing_error = "Sender authorization failed: " + decision.reason
             email.save()
             return email
+        authority, actor = decision.authority, decision.actor
         if request and authority.organization_id not in {request.requester_organization_id, request.policy.insurer_id}:
             email.processing_state = InboundEmail.State.UNAUTHORIZED
             email.processing_error = "Sender organization cannot correct this request."
@@ -633,9 +671,10 @@ def deliver_reply(reply_id):
         if reply.sent_at or not platform_config().enable_email_notifications:
             return bool(reply.sent_at)
         email = reply.email
-        authority, _ = resolve_authority(email.sender, email.policy, email.extracted_payload.get("endorsement_type", ""))
-        if not authority or not authenticated_sender(email):
-            reply.last_error = "Sender authorization was revoked; reply withheld."
+        decision = authority_decision(email.sender, email.policy, email.extracted_payload.get("endorsement_type", ""))
+        authentication_error = sender_authentication_error(email)
+        if not decision.authority or authentication_error:
+            reply.last_error = "Reply withheld. " + (authentication_error or decision.reason)
             reply.save(update_fields=["last_error", "updated_at"])
             return False
         reply.attempts += 1

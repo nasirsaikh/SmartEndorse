@@ -184,6 +184,8 @@ python manage.py run_email_scheduler --interval 30 --limit 50
 
 Enter the actual **Graph client secret** or **IMAP password / OAuth token** in the mailbox Admin settings. IMAP mailboxes also configure their SMTP reply server, username, password and TLS options there. Secrets remain hidden in the forms; blank password inputs preserve saved values. Admin changes apply on the next scheduled poll. Select **Console (development only)** for IMAP replies when you want output printed during development. Microsoft 365 uses native Graph replies.
 
+Previously unauthorized emails are automatically rechecked after you update Admin grants or mailbox verification settings. An exact-address grant honors its explicitly selected **Processing user**. If a message remains blocked, **Admin > Inbound emails > Processing error** shows whether the cause is the identity grant, workflow permissions or separate sender verification. See [authorization troubleshooting](docs/EMAIL_CORRECTIONS.md#an-authorized-address-is-still-blocked) for the matching settings.
+
 Use `python manage.py process_mailbox --mailbox ID` for a one-time manual poll. Docker's `email` profile starts the APScheduler worker. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply, or [automatic polling](docs/EMAIL_INTAKE.md#automatic-polling) for startup, overlap protection and the existing route-based intake path.
 
 ### Policy configuration

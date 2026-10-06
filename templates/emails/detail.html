@@ -6,8 +6,9 @@
 {% block content %}
 <div class="d-grid gap-3 se-review-grid">
   <div class="glis-stack-3">
-    <section class="card"><div class="card-body"><h2 class="card-title">{{ email.subject }}</h2><div class="small text-body-secondary">{{ email.sender }} · {{ email.received_at }} · {{ email.mailbox.name }}</div><div class="badge align-self-start text-bg-secondary">{{ email.get_processing_state_display }}</div>{% if email.thread_id %}<a class="small" href="{% url 'inbound_email_detail' email.thread_id %}">Original email: {{ email.thread.reference }}</a>{% endif %}<pre class="se-email-body">{{ email.body_text }}</pre></div></section>
+    <section class="card"><div class="card-body"><h2 class="card-title">{{ email.subject }}</h2><div class="small text-body-secondary">From: {{ email.sender }} · {{ email.received_at }} · {{ email.mailbox.name }}</div><div class="badge align-self-start text-bg-secondary">{{ email.status_label }}</div>{% if email.thread_id %}<a class="small" href="{% url 'inbound_email_detail' email.thread_id %}">Original email: {{ email.thread.reference }}</a>{% endif %}<pre class="se-email-body">{{ email.body_text }}</pre></div></section>
     {% if email.processing_error %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i><span class="se-pre-line">{{ email.processing_error }}</span></div>{% endif %}
+    {% if email.processing_state == 'UNAUTHORIZED' and can_retry %}<p class="small text-body-secondary">After updating Admin settings, active mailboxes automatically recheck blocked emails. You can also use Recheck and process below.</p>{% endif %}
     <section class="card"><div class="card-body"><h2 class="card-title">Extraction and corrections</h2><pre class="se-json">{{ payload_json }}</pre></div></section>
   </div>
   <div class="glis-stack-3">

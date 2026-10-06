@@ -93,7 +93,7 @@ EMAIL_INTAKE_BATCH_SIZE=50
 EMAIL_INTAKE_LOCK_FILE=
 ```
 
-`EMAIL_INTAKE_BATCH_SIZE` bounds fetched emails, pending email processing and unsent replies per correction mailbox per cycle. Route-based intake also respects each mailbox's **Poll interval seconds** and **Max messages per poll** settings; its interval can be longer than the scheduler tick.
+`EMAIL_INTAKE_BATCH_SIZE` bounds fetched emails, pending email processing, authorization rechecks and unsent replies per correction mailbox per cycle. Previously unauthorized correction emails are rechecked against current Admin grants and mailbox verification settings; older checks rotate so a blocked backlog cannot prevent new mail processing. The `rechecked` statistic counts those checks. Route-based intake also respects each mailbox's **Poll interval seconds** and **Max messages per poll** settings; its interval can be longer than the scheduler tick.
 
 For production, keep `EMAIL_INTAKE_AUTOSTART=0` on web processes and run the dedicated APScheduler worker as a service:
 

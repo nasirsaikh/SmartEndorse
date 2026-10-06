@@ -14,9 +14,10 @@ import httpx
 from django.contrib.auth.models import Group
 from django.core import mail
 from django.core.mail import get_connection
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 from .ai import AIService
+from .admin import EmailAuthorityAdminForm
 from .email_intake import authenticated_sender, deliver_reply, ingest_message, process_email
 from .mailbox import GraphMailbox, IMAPMailbox
 from .models import (
@@ -242,6 +243,172 @@ class EmailCorrectionTests(BaseInsuranceTest):
         self.assertEqual(self.initial(rows=[self.row()]).processing_state, InboundEmail.State.PROCESSED)
         self.requester.groups.remove(group)
         self.assertEqual(self.initial(rows=[self.row()]).processing_state, InboundEmail.State.UNAUTHORIZED)
+
+    def test_exact_address_uses_explicit_processing_user_instead_of_sender_account(self):
+        self.authority.email_address = "external@client.example"
+        self.authority.save()
+        sender_user = User.objects.create_user("external", email=self.authority.email_address)
+        UserProfile.objects.create(user=sender_user, organization=self.client, role=UserProfile.Role.CLIENT_VIEWER)
+        body = f"Effective date: {self.today.isoformat()}\nBEGIN MEMBERS\n{json.dumps([self.row()])}\nEND MEMBERS"
+        result = process_email(self.receive(body, sender=self.authority.email_address).pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+        self.assertEqual(result.endorsement.requester, self.requester)
+
+    def test_ineligible_explicit_delegate_does_not_fall_back_to_sender_account(self):
+        self.authority.processing_user = self.manager
+        self.authority.save()
+        result = self.initial(rows=[self.row()])
+        self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIn("different organization", result.processing_error)
+        self.assertFalse(EndorsementRequest.objects.exists())
+        self.assertFalse(EmailReply.objects.exists())
+
+    def test_legacy_whitespace_and_case_in_grant_and_user_addresses_are_normalized(self):
+        self.authority.email_address = "  REQUESTER@CLIENT.EXAMPLE  "
+        self.authority.processing_user = None
+        self.authority.save()
+        self.requester.email = " Requester@Client.Example "
+        self.requester.save()
+        body = f"Effective date: {self.today.isoformat()}\nBEGIN MEMBERS\n{json.dumps([self.row()])}\nEND MEMBERS"
+        result = process_email(self.receive(body, sender="requester@client.example").pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED, result.processing_error)
+
+    def test_admin_requires_eligible_actor_for_external_email_grant(self):
+        data = {"name": "External HR", "email_address": "external@client.example", "policy": self.policy.pk,
+                "organization": self.client.pk, "permitted_types": "[]", "is_active": "on"}
+        form = EmailAuthorityAdminForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("Processing user", str(form.errors["processing_user"]))
+        data["processing_user"] = self.requester.pk
+        form = EmailAuthorityAdminForm(data=data)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        PolicyAccess.objects.filter(policy=self.policy, organization=self.client).update(can_create=False)
+        form = EmailAuthorityAdminForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("Policy access", str(form.errors["processing_user"]))
+
+    def test_missing_policy_creation_access_is_explained_and_blocks_data_and_replies(self):
+        PolicyAccess.objects.filter(policy=self.policy, organization=self.client).update(can_create=False)
+        result = self.initial(rows=[self.row()])
+        self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIn("Policy access", result.processing_error)
+        self.assertFalse(EndorsementRequest.objects.exists())
+        self.assertFalse(EmailReply.objects.exists())
+
+    def test_user_and_group_grants_do_not_delegate_around_sender_role(self):
+        self.authority.delete()
+        group = Group.objects.create(name="Corrections")
+        self.requester.groups.add(group)
+        profile = self.requester.profile
+        profile.role = UserProfile.Role.CLIENT_VIEWER
+        profile.save()
+        self.manager.profile.organization = self.client
+        self.manager.profile.save()
+        for identity in ({"user": self.requester}, {"group": group}):
+            with self.subTest(identity=identity):
+                grant = EmailAuthority.objects.create(name="Restricted sender", policy=self.policy, organization=self.client,
+                                                       processing_user=self.manager, **identity)
+                result = self.initial(rows=[self.row()])
+                self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+                self.assertIn("role cannot create", result.processing_error)
+                grant.delete()
+        self.assertFalse(EndorsementRequest.objects.exists())
+
+    def test_grant_restrictions_report_specific_reason_and_later_valid_grant_can_match(self):
+        for updates, reason in (({"is_active": False}, "inactive"),
+                                ({"valid_from": self.today + timedelta(days=1)}, "not valid today"),
+                                ({"permitted_types": ["DELETION"]}, "does not permit ADDITION")):
+            with self.subTest(updates=updates):
+                EmailAuthority.objects.filter(pk=self.authority.pk).update(is_active=True, valid_from=None, permitted_types=[])
+                EmailAuthority.objects.filter(pk=self.authority.pk).update(**updates)
+                result = self.initial(rows=[self.row()])
+                self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+                self.assertIn(reason, result.processing_error)
+        EmailAuthority.objects.create(name="Second valid grant", email_address=self.requester.email, policy=self.policy,
+                                      organization=self.client, processing_user=self.requester)
+        self.assertEqual(self.initial(rows=[self.row()]).processing_state, InboundEmail.State.PROCESSED)
+
+    def test_trusted_dmarc_supports_comments_quoted_values_and_normalized_server_ids(self):
+        self.mailbox.trusted_authserv_ids = [" MX.INSURER.EXAMPLE. "]
+        self.mailbox.save()
+        email = self.receive(authenticate=False)
+        email.headers = {"authentication-results": ['(receiver) "mx.insurer.example" 1; dmarc=pass (aligned) header.from="client.example"']}
+        email.save()
+        self.assertTrue(authenticated_sender(email))
+        self.assertEqual(process_email(email.pk).processing_state, InboundEmail.State.NEEDS_INFO)
+
+    def test_dmarc_claims_inside_comments_or_quoted_reasons_are_rejected(self):
+        for result in ("mx.insurer.example; dkim=fail (dmarc=pass header.from=client.example)",
+                       'mx.insurer.example; dmarc=pass reason="header.from=client.example"',
+                       'mx.insurer.example; dkim=fail reason="bad; dmarc=pass header.from=client.example"',
+                       "mx.insurer.example; dmarc=pass header.from=other.example"):
+            with self.subTest(result=result):
+                email = self.receive(authenticate=False)
+                email.headers = {"authentication-results": [result]}
+                email.save()
+                self.assertFalse(authenticated_sender(email))
+                processed = process_email(email.pk)
+                self.assertEqual(processed.processing_state, InboundEmail.State.UNAUTHORIZED)
+                self.assertEqual(processed.status_label, "Sender verification failed")
+                self.assertFalse(EmailReply.objects.filter(email=processed).exists())
+
+    def test_microsoft_headers_without_server_id_have_actionable_verification_error(self):
+        self.mailbox.transport = MailboxConfiguration.Transport.GRAPH
+        self.mailbox.save()
+        email = self.receive(authenticate=False)
+        email.headers = {"authentication-results": ["spf=pass smtp.mailfrom=client.example; dkim=pass header.d=client.example; dmarc=pass header.from=client.example; compauth=pass reason=100"]}
+        email.save()
+        result = process_email(email.pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIn("no receiving server ID", result.processing_error)
+        self.assertIn("Admin", result.processing_error)
+        self.assertFalse(EmailReply.objects.exists())
+
+    def test_upstream_verification_option_still_requires_a_policy_authority(self):
+        self.mailbox.require_sender_authentication = False
+        self.mailbox.save()
+        email = self.receive(authenticate=False)
+        self.assertEqual(process_email(email.pk).processing_state, InboundEmail.State.NEEDS_INFO)
+        email = self.receive(sender="unknown@client.example", authenticate=False)
+        result = process_email(email.pk)
+        self.assertEqual(result.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIn("No Email authority matches From address", result.processing_error)
+        self.assertFalse(EmailReply.objects.filter(email=result).exists())
+
+    def test_verification_failure_is_visible_in_portal_and_admin_retry_reports_block(self):
+        email = process_email(self.receive(authenticate=False).pk)
+        self.manager.is_staff = self.manager.is_superuser = True
+        self.manager.save()
+        http = Client()
+        http.force_login(self.manager)
+        response = http.get(f"/inbound-emails/{email.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sender verification failed")
+        self.assertContains(response, "no Authentication-Results header")
+        response = http.post("/admin/core/inboundemail/", {"action": "retry_intake", "_selected_action": [email.pk]}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sender verification failed: 1")
+        self.assertFalse(EmailReply.objects.exists())
+
+    def test_automatic_recheck_does_not_reapply_an_already_processed_message(self):
+        email = self.initial(rows=[self.row()])
+        email.body_text = f"BEGIN MEMBERS\n{json.dumps([self.row(full_name='Unexpected replay')])}\nEND MEMBERS"
+        email.save()
+        self.authority.is_active = False
+        self.authority.save()
+        result = process_email(email.pk, recheck_authorization=True)
+        self.assertEqual(result.processing_state, InboundEmail.State.PROCESSED)
+        self.assertEqual(result.endorsement.items.get().full_name, "Correct Member")
+
+    def test_reply_authorization_is_rechecked_with_actionable_denial(self):
+        email = self.initial(rows=[self.row()])
+        self.authority.is_active = False
+        self.authority.save()
+        self.assertFalse(deliver_reply(email.reply.pk))
+        email.reply.refresh_from_db()
+        self.assertIn("inactive", email.reply.last_error)
+        self.assertFalse(mail.outbox)
 
     def test_mail_failure_remains_pending_and_can_retry_once(self):
         email = self.initial()

@@ -769,12 +769,18 @@ class EmailAuthority(TimeStampedModel):
     def clean(self):
         super().clean()
         from django.core.exceptions import ValidationError
+        self.email_address = self.email_address.strip().lower()
         if sum(bool(x) for x in (self.email_address, self.user_id, self.group_id)) != 1:
             raise ValidationError("Select exactly one sender identity: email address, portal user or group.")
         if not isinstance(self.permitted_types, list) or any(x not in EndorsementRequest.Type.values for x in self.permitted_types):
             raise ValidationError({"permitted_types": "Use ADDITION and/or DELETION in a JSON array."})
         if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
             raise ValidationError({"valid_until": "Must be on or after valid from."})
+        if self.policy_id and self.organization_id:
+            from .email_authorization import authority_configuration_error
+            error = authority_configuration_error(self)
+            if error:
+                raise ValidationError({"user" if self.user_id else "processing_user" if self.email_address else "group": error})
 
     def __str__(self):
         return self.name
@@ -825,6 +831,12 @@ class InboundEmail(TimeStampedModel):
     @property
     def thread_reference(self):
         return self.thread.reference if self.thread_id else self.reference
+
+    @property
+    def status_label(self):
+        if self.processing_state == self.State.UNAUTHORIZED and self.processing_error.startswith("Sender verification failed:"):
+            return "Sender verification failed"
+        return self.get_processing_state_display()
 
     def __str__(self):
         return f"{self.reference} / {self.subject}"

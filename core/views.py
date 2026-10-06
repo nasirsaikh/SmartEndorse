@@ -1381,9 +1381,17 @@ def inbound_email_detail(request, pk):
         if request.POST.get("action") == "retry_delivery":
             reply = getattr(email, "reply", None)
             if reply:
-                deliver_reply(reply.pk)
+                if deliver_reply(reply.pk):
+                    messages.success(request, "Email reply delivered.")
+                else:
+                    reply.refresh_from_db()
+                    messages.warning(request, reply.last_error or "Reply remains pending. Check email notification and delivery settings in Admin.")
         else:
-            process_email(email.pk, force=True)
-        messages.success(request, "Email authorization and processing rechecked.")
+            from .models import InboundEmail
+            result = process_email(email.pk, force=True)
+            if result.processing_state == InboundEmail.State.UNAUTHORIZED:
+                messages.warning(request, result.processing_error)
+            else:
+                messages.success(request, f"Email rechecked: {result.status_label}.")
         return redirect("inbound_email_detail", pk=email.pk)
     return render(request, "emails/detail.html", {"email": email, "payload_json": json.dumps(email.extracted_payload, indent=2, ensure_ascii=False), "can_retry": request.user.is_staff and (not email.endorsement_id or can_insurer_operate(request.user, email.endorsement))})

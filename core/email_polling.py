@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def poll_correction_mailbox(config, limit=50):
-    stats = {"messages": 0, "processed": 0, "replies_sent": 0, "failed": 0}
+    stats = {"messages": 0, "processed": 0, "rechecked": 0, "replies_sent": 0, "failed": 0}
     transport = None
     try:
         transport = GraphMailbox(config) if config.transport == MailboxConfiguration.Transport.GRAPH else IMAPMailbox(config)
@@ -37,6 +37,10 @@ def poll_correction_mailbox(config, limit=50):
         config.save(update_fields=["last_sync_at", "last_error", "updated_at"])
 
     # Fetch failures must not block already stored emails or pending reply delivery.
+    # Snapshot before processing new messages to avoid checking a new rejection
+    # twice in one tick. Rotate the oldest checks so a blocked backlog is bounded
+    # and cannot prevent new mail from being processed.
+    blocked_ids = list(InboundEmail.objects.filter(mailbox=config, processing_state=InboundEmail.State.UNAUTHORIZED).order_by("updated_at", "pk").values_list("pk", flat=True)[:limit])
     pending = InboundEmail.objects.filter(mailbox=config, processing_state=InboundEmail.State.RECEIVED).order_by("pk")
     for email_id in pending.values_list("pk", flat=True)[:limit]:
         try:
@@ -45,6 +49,13 @@ def poll_correction_mailbox(config, limit=50):
         except Exception:
             stats["failed"] += 1
             logger.exception("Email %s could not be processed; it remains pending for retry.", email_id)
+    for email_id in blocked_ids:
+        try:
+            process_email(email_id, recheck_authorization=True)
+            stats["rechecked"] += 1
+        except Exception:
+            stats["failed"] += 1
+            logger.exception("Email %s authorization could not be rechecked.", email_id)
     replies = EmailReply.objects.filter(email__mailbox=config, sent_at__isnull=True).order_by("pk")
     for reply_id in replies.values_list("pk", flat=True)[:limit]:
         try:
@@ -59,7 +70,7 @@ def poll_correction_mailbox(config, limit=50):
 
 
 def poll_correction_mailboxes(*, limit=50, mailbox_id=None):
-    result = {"mailboxes": 0, "messages": 0, "processed": 0, "replies_sent": 0, "failed": 0}
+    result = {"mailboxes": 0, "messages": 0, "processed": 0, "rechecked": 0, "replies_sent": 0, "failed": 0}
     boxes = MailboxConfiguration.objects.filter(is_active=True).order_by("pk")
     if mailbox_id is not None:
         boxes = boxes.filter(pk=mailbox_id)

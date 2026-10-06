@@ -243,6 +243,61 @@ class ScheduledCorrectionTests(BaseInsuranceTest):
             self.assertEqual(InboundEmail.objects.filter(processing_state=InboundEmail.State.RECEIVED).count(), 1)
         self.assertEqual(len(mail.outbox), 2)
 
+    def test_next_poll_rechecks_stored_unauthorized_email_after_grant_is_added(self):
+        EmailAuthority.objects.all().delete()
+        original = self.receive([{"employee_no": "E1", "full_name": "First Member", "date_of_birth": "1990-01-01", "gender": "Male", "relationship": "Employee", "plan_code": self.plan.code}])
+        process_email(original.pk)
+        original.refresh_from_db()
+        self.assertEqual(original.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertFalse(EmailReply.objects.exists())
+        EmailAuthority.objects.create(name="Authorized HR", email_address=self.requester.email, organization=self.client, policy=self.policy, processing_user=self.requester)
+        with patch("core.email_polling.IMAPMailbox") as transport:
+            transport.return_value.poll.return_value = []
+            poll_correction_mailboxes()
+            original.refresh_from_db()
+            self.assertEqual(original.processing_state, InboundEmail.State.PROCESSED, original.processing_error)
+            self.assertEqual(original.endorsement.items.count(), 1)
+            self.assertEqual(len(mail.outbox), 1)
+            poll_correction_mailboxes()
+            self.assertEqual(original.endorsement.items.count(), 1)
+            self.assertEqual(len(mail.outbox), 1)
+
+    def test_rechecks_keep_unverified_mail_blocked_and_do_not_starve_new_mail(self):
+        blocked = self.receive([{"employee_no": "E1", "full_name": "Blocked Member"}])
+        blocked.headers = {}
+        blocked.save()
+        process_email(blocked.pk)
+        fresh = self.receive([{"employee_no": "E2", "full_name": "Fresh Member"}])
+        with patch("core.email_polling.IMAPMailbox") as transport:
+            transport.return_value.poll.return_value = []
+            result = poll_correction_mailboxes(limit=1)
+        blocked.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual(result["processed"], 1)
+        self.assertEqual(result["rechecked"], 1)
+        self.assertEqual(result["replies_sent"], 1)
+        self.assertEqual(blocked.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIsNone(blocked.endorsement_id)
+        self.assertFalse(EmailReply.objects.filter(email=blocked).exists())
+        self.assertEqual(fresh.processing_state, InboundEmail.State.NEEDS_INFO)
+        self.assertEqual(fresh.endorsement.items.get().full_name, "Fresh Member")
+
+    def test_mailbox_verification_change_rechecks_stored_mail_without_a_duplicate(self):
+        original = self.receive([{"employee_no": "E1", "full_name": "First Member"}])
+        original.headers = {}
+        original.save()
+        process_email(original.pk)
+        self.mailbox.require_sender_authentication = False
+        self.mailbox.save()
+        with patch("core.email_polling.IMAPMailbox") as transport:
+            transport.return_value.poll.return_value = []
+            result = poll_correction_mailboxes()
+        original.refresh_from_db()
+        self.assertEqual(result["rechecked"], 1)
+        self.assertEqual(original.processing_state, InboundEmail.State.NEEDS_INFO)
+        self.assertEqual(original.endorsement.items.count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+
 
 class MailboxPollingIsolationTests(TestCase):
     def test_scheduler_routes_duplicate_mailbox_address_to_correction_workflow_only(self):
@@ -257,7 +312,7 @@ class MailboxPollingIsolationTests(TestCase):
         broken = MailboxConfiguration.objects.create(name="Broken", email_address="broken@example.com", is_active=True)
         healthy = MailboxConfiguration.objects.create(name="Healthy", email_address="healthy@example.com", is_active=True)
         MailboxConfiguration.objects.create(name="Inactive", email_address="inactive@example.com", is_active=False)
-        stats = {"messages": 1, "processed": 1, "replies_sent": 1, "failed": 0}
+        stats = {"messages": 1, "processed": 1, "rechecked": 0, "replies_sent": 1, "failed": 0}
         with patch("core.email_polling.poll_correction_mailbox", side_effect=[RuntimeError("offline"), stats]) as poll, self.assertLogs("core.email_polling", level="ERROR"):
             result = poll_correction_mailboxes(limit=7)
         self.assertEqual([call.args[0].pk for call in poll.call_args_list], [broken.pk, healthy.pk])

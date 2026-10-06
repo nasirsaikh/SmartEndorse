@@ -1,5 +1,6 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.utils.text import Truncator
 
 from .models import (
     AIExtractionProfile, AIProviderConfig, AITrainingExample, Attachment, EmailIntakeMailbox, EmailIntakeMessage, EmailIntakeRoute,
@@ -374,12 +375,46 @@ class MailboxConfigurationAdmin(admin.ModelAdmin):
     )
 
 
+class EmailAuthorityAdminForm(forms.ModelForm):
+    class Meta:
+        model = EmailAuthority
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["processing_user"].help_text = (
+            "For an exact email address, this user performs the workflow even if the sender has another portal account. "
+            "Required when no unique eligible portal account matches. The user must be active, belong to the grant organization "
+            "and have creation access to the policy. User/group grants act as the sender."
+        )
+
+
 @admin.register(EmailAuthority)
 class EmailAuthorityAdmin(admin.ModelAdmin):
-    list_display = ("name", "policy", "organization", "email_address", "user", "group", "is_active", "valid_until")
+    form = EmailAuthorityAdminForm
+    list_display = ("name", "policy", "organization", "email_address", "user", "group", "is_active", "valid_until", "configuration_status")
     list_filter = ("is_active", "organization", "policy")
     search_fields = ("name", "email_address", "user__email", "policy__policy_number")
     autocomplete_fields = ("policy", "organization", "user", "processing_user", "group")
+    readonly_fields = ("configuration_status",)
+
+    @admin.display(description="Grant configuration")
+    def configuration_status(self, obj):
+        from .email_authorization import authority_configuration_error
+        from django.utils import timezone
+        if not obj or not obj.pk:
+            return "Checked when you save."
+        if not obj.is_active:
+            return "Inactive"
+        error = authority_configuration_error(obj)
+        if error:
+            return error
+        today = timezone.localdate()
+        if obj.valid_from and obj.valid_from > today:
+            return f"Starts {obj.valid_from}"
+        if obj.valid_until and obj.valid_until < today:
+            return f"Expired {obj.valid_until}"
+        return "Configured. Group members are checked individually." if obj.group_id else "Configured. Mailbox sender verification is checked separately."
 
 
 class EmailEvidenceInline(admin.TabularInline):
@@ -394,7 +429,7 @@ class EmailEvidenceInline(admin.TabularInline):
 
 @admin.register(InboundEmail)
 class InboundEmailAdmin(admin.ModelAdmin):
-    list_display = ("reference", "mailbox", "sender", "subject", "processing_state", "endorsement", "received_at")
+    list_display = ("reference", "mailbox", "sender", "subject", "processing_status", "failure_reason", "endorsement", "received_at")
     list_filter = ("processing_state", "mailbox")
     search_fields = ("reference", "sender", "subject", "endorsement__reference")
     readonly_fields = tuple(field.name for field in InboundEmail._meta.fields)
@@ -404,12 +439,24 @@ class InboundEmailAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
+    @admin.display(description="Status", ordering="processing_state")
+    def processing_status(self, obj):
+        return obj.status_label
+
+    @admin.display(description="Processing reason")
+    def failure_reason(self, obj):
+        return Truncator(obj.processing_error).chars(140) or "—"
+
     @admin.action(description="Recheck authorization and retry email extraction")
     def retry_intake(self, request, queryset):
         from .email_intake import process_email
+        counts = {}
         for email in queryset:
-            process_email(email.pk, force=True)
-        self.message_user(request, "Selected emails rechecked and processed.")
+            result = process_email(email.pk, force=True)
+            counts[result.status_label] = counts.get(result.status_label, 0) + 1
+        summary = "; ".join(f"{status}: {count}" for status, count in counts.items())
+        blocked = any(status in {"Unauthorized sender", "Sender verification failed"} for status in counts)
+        self.message_user(request, f"Rechecked emails — {summary}. See Processing error for any remaining block.", level=messages.WARNING if blocked else messages.SUCCESS)
 
 
 @admin.register(EmailReply)
