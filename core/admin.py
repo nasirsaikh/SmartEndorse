@@ -350,6 +350,19 @@ class MailboxConfigurationAdminForm(SavedSecretAdminForm):
     clear_graph_client_secret = forms.BooleanField(required=False, label="Clear saved Graph client secret")
     clear_smtp_password = forms.BooleanField(required=False, label="Clear saved SMTP password")
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["require_sender_authentication"].help_text = (
+            "Checked: SmartEndorse requires an aligned DMARC pass in Authentication-Results from a trusted server. "
+            "Unchecked: rely on sender verification at your receiving mail provider and use Email authorities for policy authorization. "
+            "If messages have no Authentication-Results header, leave this unchecked only where the receiving provider verifies senders. "
+            "Active email/user/group grants and policy creation permissions are always required."
+        )
+        self.fields["trusted_authserv_ids"].help_text = (
+            'Used only when Require sender authentication is checked. Enter exact server IDs as a JSON array, e.g. ["mx.company.example"]. '
+            "Leave empty when sender verification is handled by the receiving provider."
+        )
+
     class Meta:
         model = MailboxConfiguration
         fields = "__all__"
@@ -362,17 +375,39 @@ class MailboxConfigurationAdminForm(SavedSecretAdminForm):
 @admin.register(MailboxConfiguration)
 class MailboxConfigurationAdmin(admin.ModelAdmin):
     form = MailboxConfigurationAdminForm
-    list_display = ("name", "email_address", "transport", "is_active", "auto_submit", "last_sync_at", "last_error")
+    list_display = ("name", "email_address", "transport", "is_active", "sender_verification_mode", "auto_submit", "last_sync_at", "last_error")
     list_filter = ("transport", "is_active", "auto_submit")
-    readonly_fields = ("cursor", "last_sync_at", "last_error")
+    readonly_fields = ("sender_verification_mode", "cursor", "last_sync_at", "last_error")
+    actions = ("use_provider_verification",)
     fieldsets = (
         ("Mailbox", {"fields": ("name", "email_address", "transport", "is_active", "folder", "default_policy", "auto_submit")}),
         ("IMAP", {"fields": ("imap_host", "imap_port", "imap_username", "imap_password", "clear_imap_password", "use_oauth")}),
         ("Microsoft 365", {"fields": ("graph_tenant_id", "graph_client_id", "graph_client_secret", "clear_graph_client_secret")}),
         ("IMAP reply delivery", {"fields": ("reply_backend", "smtp_host", "smtp_port", "smtp_username", "smtp_password", "clear_smtp_password", "smtp_use_tls", "smtp_use_ssl", "smtp_timeout")}),
-        ("Sender verification", {"fields": ("require_sender_authentication", "trusted_authserv_ids")}),
+        ("Sender verification", {
+            "description": "Email authorities always control policy access. If your receiving mail provider verifies senders and messages lack Authentication-Results, uncheck Require sender authentication and save. Previously blocked emails will be rechecked on scheduled polls.",
+            "fields": ("sender_verification_mode", "require_sender_authentication", "trusted_authserv_ids"),
+        }),
         ("Polling status", {"fields": ("cursor", "last_sync_at", "last_error")}),
     )
+
+    @admin.display(description="Sender verification")
+    def sender_verification_mode(self, obj):
+        if obj is None:
+            return "Choose the settings below before saving."
+        return "DMARC header + Email authorities" if obj.require_sender_authentication else "Trust receiving provider + Email authorities"
+
+    @admin.action(permissions=["change"], description="Trust receiving provider for sender verification (keep Email authority checks)")
+    def use_provider_verification(self, request, queryset):
+        from django.db import transaction
+        changed = 0
+        with transaction.atomic():
+            for mailbox in queryset.filter(require_sender_authentication=True):
+                mailbox.require_sender_authentication = False
+                mailbox.save(update_fields=["require_sender_authentication", "updated_at"])
+                self.log_change(request, mailbox, "Disabled local DMARC header verification; explicitly rely on the receiving provider's sender checks. Email authority and policy access checks remain required.")
+                changed += 1
+        self.message_user(request, f"{changed} mailbox(es) now rely on the receiving provider's sender verification. Email authorities and policy permissions remain required. Active mailboxes will recheck blocked emails on scheduled polls.")
 
 
 class EmailAuthorityAdminForm(forms.ModelForm):

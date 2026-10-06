@@ -391,6 +391,39 @@ class EmailCorrectionTests(BaseInsuranceTest):
         self.assertContains(response, "Sender verification failed: 1")
         self.assertFalse(EmailReply.objects.exists())
 
+    def test_provider_setting_action_unblocks_authorized_headerless_mail_on_next_poll(self):
+        from .email_polling import poll_correction_mailboxes
+        body = f"Effective date: {self.today.isoformat()}\nBEGIN MEMBERS\n{json.dumps([self.row()])}\nEND MEMBERS"
+        original = process_email(self.receive(body, authenticate=False).pk)
+        intruder = process_email(self.receive(body, sender="intruder@client.example", authenticate=False).pk)
+        self.assertEqual(original.processing_state, InboundEmail.State.UNAUTHORIZED)
+        self.assertIn("Uncheck Require sender authentication", original.processing_error)
+        self.assertFalse(EndorsementRequest.objects.exists())
+        self.manager.is_staff = self.manager.is_superuser = True
+        self.manager.save()
+        http = Client()
+        http.force_login(self.manager)
+        response = http.post("/admin/core/mailboxconfiguration/", {
+            "action": "use_provider_verification", "_selected_action": [self.mailbox.pk],
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        with patch("core.email_polling.IMAPMailbox") as transport:
+            transport.return_value.poll.return_value = []
+            result = poll_correction_mailboxes()
+            original.refresh_from_db()
+            intruder.refresh_from_db()
+            self.assertEqual(result["rechecked"], 2)
+            self.assertEqual(original.processing_state, InboundEmail.State.PROCESSED, original.processing_error)
+            self.assertEqual(original.endorsement.items.count(), 1)
+            self.assertEqual(intruder.processing_state, InboundEmail.State.UNAUTHORIZED)
+            self.assertIn("No Email authority matches", intruder.processing_error)
+            self.assertIsNone(intruder.endorsement_id)
+            self.assertFalse(EmailReply.objects.filter(email=intruder).exists())
+            self.assertEqual(len(mail.outbox), 1)
+            poll_correction_mailboxes()
+            self.assertEqual(original.endorsement.items.count(), 1)
+            self.assertEqual(len(mail.outbox), 1)
+
     def test_automatic_recheck_does_not_reapply_an_already_processed_message(self):
         email = self.initial(rows=[self.row()])
         email.body_text = f"BEGIN MEMBERS\n{json.dumps([self.row(full_name='Unexpected replay')])}\nEND MEMBERS"

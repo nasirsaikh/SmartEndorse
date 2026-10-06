@@ -190,7 +190,9 @@ def sender_authentication_error(email):
         return f"Sender verification failed: Trusted authserv IDs is empty. {settings_hint}"
     results = email.headers.get("authentication-results", [])
     if not results:
-        return f"Sender verification failed: this email has no Authentication-Results header, but this mailbox requires a trusted DMARC pass. {settings_hint}"
+        return ("Sender verification failed: this email has no Authentication-Results header. "
+                "Uncheck Require sender authentication in Admin > Mailbox configurations > Sender verification "
+                "only if your receiving mail provider already verifies senders. Email authorities and policy access remain required.")
     domain = email.sender.rsplit("@", 1)[1].strip().casefold().rstrip(".")
     trusted_found, observed, unidentified = False, set(), False
     for result in results:

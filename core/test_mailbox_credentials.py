@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
-from django.contrib.auth.models import User
+from django.contrib.admin.models import CHANGE, LogEntry
+from django.contrib.auth.models import Permission, User
 from django.core.mail import get_connection
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
@@ -153,6 +154,37 @@ class MailboxCredentialValidationTests(TestCase):
             self.assertNotIn(getattr(self.mailbox, field), html)
         self.assertNotIn('name="graph_secret_reference"', html)
         self.assertNotIn('name="credential_reference"', html)
+
+    def test_provider_verification_admin_action_changes_only_selected_mailbox_and_records_history(self):
+        other = MailboxConfiguration.objects.create(name='Keep strict', email_address='strict@example.com')
+        secrets = {field: getattr(self.mailbox, field) for field in MailboxConfigurationAdminForm.secret_fields}
+        user = User.objects.create_user('verification-admin', is_staff=True, is_superuser=True)
+        self.client.force_login(user)
+        response = self.client.post('/admin/core/mailboxconfiguration/', {
+            'action': 'use_provider_verification', '_selected_action': [self.mailbox.pk],
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.mailbox.refresh_from_db()
+        other.refresh_from_db()
+        self.assertFalse(self.mailbox.require_sender_authentication)
+        self.assertTrue(other.require_sender_authentication)
+        for field, value in secrets.items():
+            self.assertEqual(getattr(self.mailbox, field), value)
+        entry = LogEntry.objects.get(user=user, object_id=str(self.mailbox.pk), action_flag=CHANGE)
+        self.assertIn('receiving provider', entry.change_message)
+        self.assertContains(response, 'Email authorities and policy permissions remain required')
+
+    def test_provider_verification_action_requires_mailbox_change_permission(self):
+        user = User.objects.create_user('mailbox-viewer', is_staff=True)
+        user.user_permissions.add(Permission.objects.get(codename='view_mailboxconfiguration', content_type__app_label='core'))
+        self.client.force_login(user)
+        response = self.client.post('/admin/core/mailboxconfiguration/', {
+            'action': 'use_provider_verification', '_selected_action': [self.mailbox.pk],
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.mailbox.refresh_from_db()
+        self.assertTrue(self.mailbox.require_sender_authentication)
+        self.assertFalse(LogEntry.objects.filter(user=user, action_flag=CHANGE).exists())
 
     def test_polling_recovers_using_new_admin_secret_without_worker_restart(self):
         self.mailbox.graph_client_secret = ''

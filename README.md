@@ -186,6 +186,8 @@ Enter the actual **Graph client secret** or **IMAP password / OAuth token** in t
 
 Previously unauthorized emails are automatically rechecked after you update Admin grants or mailbox verification settings. An exact-address grant honors its explicitly selected **Processing user**. If a message remains blocked, **Admin > Inbound emails > Processing error** shows whether the cause is the identity grant, workflow permissions or separate sender verification. See [authorization troubleshooting](docs/EMAIL_CORRECTIONS.md#an-authorized-address-is-still-blocked) for the matching settings.
 
+For **no Authentication-Results header** errors where the receiving provider already verifies senders, uncheck **Require sender authentication** in the mailbox's **Sender verification** settings. The mailbox list also offers **Trust receiving provider for sender verification (keep Email authority checks)** for selected mailboxes. This choice is stored in Admin, logged in history, and takes effect on the next poll while retaining policy-scoped sender grants and workflow permissions.
+
 Use `python manage.py process_mailbox --mailbox ID` for a one-time manual poll. Docker's `email` profile starts the APScheduler worker. See [email setup and correction examples](docs/EMAIL_CORRECTIONS.md) for IMAP/SMTP, Microsoft 365 permissions, sender/group authorization, and a sample correction reply, or [automatic polling](docs/EMAIL_INTAKE.md#automatic-polling) for startup, overlap protection and the existing route-based intake path.
 
 ### Policy configuration
